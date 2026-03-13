@@ -19,19 +19,26 @@ def get_logger():
     # 1. Grab the name of the file that called this function
     caller_frame = inspect.stack()[1]
     caller_module = inspect.getmodule(caller_frame[0])
-    
-    # If called from a script, it gets the filename. 
-    # If called from a notebook, it usually defaults to '__main__'
     logger_name = caller_module.__name__ if caller_module else "root"
 
-    # 2. Configure the logger
+    # 2. Get the specific logger for this file
     logger = logging.getLogger(logger_name)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.FileHandler("training.log"), # Saves to a file
-            logging.StreamHandler()              # Prints to terminal
-        ]
-    )
-    return logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # 3. Prevent duplicate logs if called multiple times (crucial for notebooks)
+    if not logger.handlers:
+        # Create the format (Notice I added [%(name)s] so it prints the file name!)
+        formatter = logging.Formatter("%(asctime)s - [%(name)s] - %(levelname)s - %(message)s")
+        
+        # File Handler (Saves to training.log)
+        file_handler = logging.FileHandler("training.log")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # Stream Handler (Prints to terminal/notebook)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+    # 4. Return the specific logger we just built
+    return logger
