@@ -27,7 +27,7 @@ def get_logger():
 
     # 3. Prevent duplicate logs if called multiple times (crucial for notebooks)
     if not logger.handlers:
-        # Create the format (Notice I added [%(name)s] so it prints the file name!)
+        # Create the format
         formatter = logging.Formatter("%(asctime)s - [%(name)s] - %(levelname)s - %(message)s")
         
         # File Handler (Saves to training.log)
@@ -42,3 +42,42 @@ def get_logger():
 
     # 4. Return the specific logger we just built
     return logger
+
+
+def test_function(func, test_cases, tolerance=1e-5):
+    """
+    Expects test cases to be a list of tuples which carry a dictionary of inputs and the expected output.
+    e.g. 
+    test_cases = [
+        # Tuple 1 (Test Case 1)
+        ( {"z_n": 0.5, "c_n": 0.2, "beta": 1.0},  1.0 ),
+        
+        # Tuple 2 (Test Case 2)
+        ( {"z_n": 0.0, "c_n": 100.0, "beta": 2.0}, 0.0 )
+    ]
+     """
+    
+    print(f"--- Running tests for: {func.__name__} ---")
+    
+    passed = 0
+    failed = 0
+
+    for i, (inputs, expected_outputs) in enumerate(test_cases): # grab a test case (touple) and unpack inputs (dict) and expected outputs
+        try:
+            # Call the function with the inputs not as dict, but unpacked as keyword arguments
+            result = func(**inputs) 
+            # Check if the absolute difference is within our tolerance (ignores sign)
+            error = abs(result - expected_outputs)
+            if error <= tolerance:
+                print(f"  [PASS] Test {i+1}: Output {result:.5f} matched expected {expected_outputs}")
+                passed += 1
+            else:
+                print(f"  [FAIL] Test {i+1}: Expected {expected_outputs}, got {result:.5f} (Error: {error})")
+                failed += 1
+                
+        except Exception as e:
+            print(f"  [ERROR] Test {i+1} crashed with inputs {inputs}. Error: {e}")
+            failed += 1
+            
+    print(f"--- Results: {passed} Passed | {failed} Failed ---\n")
+    return failed == 0
