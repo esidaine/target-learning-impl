@@ -67,12 +67,13 @@ def test_function(func, test_cases, tolerance=1e-5):
             # Call the function with the inputs not as dict, but unpacked as keyword arguments
             result = func(**inputs) 
             # Check if the absolute difference is within our tolerance (ignores sign)
-            error = abs(result - expected_outputs)
-            if error <= tolerance:
+            error_array = np.abs(result - expected_outputs)
+            
+            if np.allclose(result, expected_outputs, atol=tolerance):
                 print(f"  [PASS] Test {i+1}: Output {result:.5f} matched expected {expected_outputs}")
                 passed += 1
             else:
-                print(f"  [FAIL] Test {i+1}: Expected {expected_outputs}, got {result:.5f} (Error: {error})")
+                print(f"  [FAIL] Test {i+1}: Expected {expected_outputs}, got {result:.5f} (Error: {error_array})")
                 failed += 1
                 
         except Exception as e:
