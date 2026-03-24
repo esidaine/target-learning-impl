@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 
 sys.path.append(os.path.abspath('..')) # Append the absolute path of the project root to Python's search map to enable core imports
-from src.core.utils import get_logger
+from utils import get_logger
 logger = get_logger()
 
 class XORDataset(Dataset): # build a custom class from torch's Dataset class

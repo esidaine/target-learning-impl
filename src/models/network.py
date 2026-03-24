@@ -1,7 +1,13 @@
-import numpy as np 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import sys
+sys.path.append(os.path.abspath('..'))
+from utils import get_logger
+
+logger = get_logger()
+
 
 class Network(nn.Module):
     def __init__(self, pop_sizes):
@@ -38,6 +44,7 @@ class Network(nn.Module):
 
             elif control_signals is not None:
                 # During the settling phase, we want to keep PyTorch’s Autograd graph attached so we can backpropagate errors to c_n.
+                # Allows PyTorch to trace the errors back to cn​ during the .backward() step.
                 pop.a_controlled = activation
 
         return activation
@@ -89,93 +96,3 @@ class NeuralPopulation(nn.Module):
         
         return r
     
-class ControlMechanism: 
-    """
-    Generates the control signal (c_n) (per neuron) and finds the optimal control signal (c_n*) that allows the neuron to converge to the target firing rate (a_target).
-    Has two implementations: with backpropagation and with PID control 
-    """
-    def __init__(self, mode='backprop', lr_c=0.1, max_steps=50):
-        
-        # Determine which control algorithm to use
-        self.mode = mode 
-        
-        # --- Gradient-Based Optimization Parameters ---
-        self.lr_c = lr_c             # Learning rate for updating c_n
-        self.max_steps = max_steps   # Max iterations to find c_n*
-        self.tolerance = 1e-4        # Convergence threshold
-        
-        # --- PID Controller Parameters ---
-        #TODO
-
-    def initialize_controls(self, batch_size, neuron_populations):
-        """
-        Creates the tunable 'c_n' tensors, one for each hidden layer/ group of neurons, stored in a list.
-        """
-        control_signals = [] 
-        
-        for pop in neuron_populations:
-            c_n = torch.zeros(
-                (batch_size, pop.num_neurons), 
-                device=pop.W.weight.device, 
-                requires_grad=True
-            )
-            
-            control_signals.append(c_n) 
-            
-        return control_signals
-
-    def optimize_control_signal(self, sensory_inputs, target_y, network):
-        """
-        Finds the optimal c_n* using the selected mode.
-        """
-        # Initialize c_n to zeros (neutral dendritic input)
-        batch_size = sensory_inputs.size(0) # sensory_inputs is a tensor of shape [batch_size, number of features per data point]
-        
-         # ==========================================
-        # STEP 1: THE BASELINE PASS
-        # ==========================================
-        # We use torch.no_grad() because the baseline guess requires no optimization.
-        # This prevents PyTorch from building a useless computational graph.
-        with torch.no_grad():
-            network(sensory_inputs, control_signals=None, save_baseline=True)
-
-        # ==========================================
-        # STEP 2: INITIALIZE CONTROLS TO BE TUNED
-        # ==========================================
-        # Create the list of c_n tensors that will be tuned and where gradients will be tracked.
-        control_signals = self.initialize_controls(batch_size, network.populations)
-
-        # ==========================================
-        # STEP 3: THE OPTIMIZATION PHASE
-        # ==========================================
-        if self.mode == 'backprop':
-            return self._optimize_via_backprop(control_signals, sensory_inputs, target_y, network)
-        elif self.mode == 'pid':
-            return self._optimize_via_pid(control_signals, sensory_inputs, target_y, network)
-        else:
-            raise ValueError("Mode must be 'backprop' or 'pid'")
-        
-    def _optimize_via_backprop(self, c_n, sensory_inputs, target_y, network):
-        
-        # Use adam to optimize with momentum and adaptive learning rates.
-        # Note: Cast to a list() for PyTorch stability. 
-        c_optimizer = torch.optim.Adam(list(control_signals.values()), lr=self.lr_c)
-       
-        
-    def _optimize_via_pid(self, c_n, sensory_inputs, target_y, network):
-        #TODO
-        return c_n
-    
-
-class Plasticity:
-    """
-    Updates the weights based on the learning rule
-    """
-    def learning_rule(a_pre, a_baseline, a_controlled):  
-        errors = a_controlled - a_baseline # one for each neuron
-        return np.dot(a_pre.T, errors) # a_pre.shape is a single row (1, k) and errors.shape is (1, u)
-    
-    def train_single_step(self): 
-        # TODO
-        return 
-        
