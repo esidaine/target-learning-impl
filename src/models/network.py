@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import os
 import sys
 sys.path.append(os.path.abspath('..'))
-from utils import get_logger
+from src.utils.utils import get_logger
 
 logger = get_logger()
 

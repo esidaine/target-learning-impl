@@ -2,9 +2,8 @@ import os
 import sys
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 sys.path.append(os.path.abspath('..'))
-from utils import get_logger
+from src.utils.utils import get_logger
 
 logger = get_logger()
 
@@ -51,7 +50,7 @@ class ControlMechanism:
         # Initialize c_n to zeros (neutral dendritic input)
         batch_size = sensory_inputs.size(0) # sensory_inputs is a tensor of shape [batch_size, number of features per data point]
         
-         # ==========================================
+        # ==========================================
         # STEP 1: THE BASELINE PASS
         # ==========================================
 
