@@ -21,7 +21,7 @@ class ControlMechanism:
         # --- Gradient-Based Optimization Parameters ---
         self.lr_c = lr_c             # Learning rate for updating c_n
         self.max_steps = max_steps   # Max iterations to find c_n*
-        self.tolerance = 1e-4        # Convergence threshold
+        self.tolerance = 0.001        # Convergence threshold [!] Should be reconsidered or tuned
         
         # --- PID Controller Parameters ---
         #TODO
@@ -91,8 +91,14 @@ class ControlMechanism:
 
         # Loss function (Mean Squared Error denotes averaging over the errors f(x) - y squared (per data point) across the batch)
         criterion = nn.MSELoss()
+
+        final_loss = float('inf') 
+        initial_loss = float('inf')
+        steps_taken = 0
         
         for step in range(self.max_steps):
+            steps_taken = step + 1
+
             # 1. Zero the gradients for c_n
             c_optimizer.zero_grad()
             
@@ -102,10 +108,13 @@ class ControlMechanism:
 
             # 3. Calculate how far off we are from the target
             loss = criterion(y_pred, target_y)
+            if step == 0:
+                initial_loss = loss.item() # Store the initial loss for monitoring improvement
+            final_loss = loss.item()
 
             # 4. Check for early convergence
-            if loss.item() < self.tolerance:
-                logger.info(f"Converged at step {step} with loss {loss.item()}")
+            if final_loss < self.tolerance:
+                logger.debug(f"Converged at step {step} with loss {loss.item()}")
                 break
 
             # 5. Backpropagate the error to calculate gradients with respect to c_n
@@ -113,6 +122,10 @@ class ControlMechanism:
             
             # 6. Take a step to update c_n
             c_optimizer.step()
+
+        improvement = initial_loss - final_loss
+        if steps_taken == self.max_steps and improvement <= 0.001: 
+            logger.warning(f" [!] Control Optimization struggled!  {initial_loss:.4f} -> {final_loss:.4f} in {steps_taken} steps.")
 
         # Clean up memory 
         for pop in network.populations:

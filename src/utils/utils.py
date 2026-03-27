@@ -2,7 +2,70 @@ import torch
 import numpy as np
 import random
 import logging
+import os
 import inspect
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import wandb
+
+
+def save_experiment(network, controller, plasticity, epoch, loss, task, save_dir="weights", is_best=False):
+    """
+    Saves the model weights and experiment metadata.
+    """
+    # 1. Create a dedicated directory if it doesn't exist
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 2. If it's the best model, overwrite the single 'best' file. Otherwise, save a 'latest' file.
+    if is_best:
+        base_filename = f"{task}_{controller.mode}_best_model"
+    else:
+        base_filename = f"{task}_{controller.mode}_latest_model"
+    
+    # 3. Harvest the Hyperparameters (The "Context")
+    hyperparameters = {
+        "architecture": {
+            "pop_sizes":[network.populations[0].W.in_features] + [pop.num_neurons for pop in network.populations],
+        },
+        "mechanics": {
+            "mode": controller.mode,
+            "lr_c": controller.lr_c,
+            "max_steps": controller.max_steps,
+            "lr_theta": plasticity.lr_theta
+        },
+        "training": {
+            "epoch_reached": epoch,
+            "final_loss": float(loss),
+            "seed": 7 # Hardcoded for reproducibility, but could be made dynamic if needed
+        }
+    }
+
+    # 4. Harvest the Weights
+    # Assuming populations have a 'synapses' attribute with weights/biases
+    model_state = {
+        'weights': [pop.W.weight.data.clone() for pop in network.populations],
+    }
+
+    # 5. Save the pure JSON metadata (For human readability and quick scanning)
+
+    json_path = os.path.join(save_dir, f"{base_filename}_meta.json")
+    with open(json_path, 'w') as f:
+        json.dump(hyperparameters, f, indent=4)
+
+    # 6. Save the PyTorch Checkpoint (Contains everything needed to resume)
+    checkpoint = {
+        "hyperparameters": hyperparameters,
+        "model_state": model_state
+    }
+    pth_path = os.path.join(save_dir, f"{base_filename}.pth")
+    torch.save(checkpoint, pth_path)
+    # Tell W&B to upload these specific files to the cloud! ---
+    if wandb.run is not None:  # Check if W&B is active
+        wandb.save(json_path, base_path=save_dir)
+        wandb.save(pth_path, base_path=save_dir)
+
 
 def set_all_seeds(seed=42):
     """Locks all random number generators for reproducibility."""
@@ -82,3 +145,41 @@ def test_function(func, test_cases, tolerance=1e-5):
             
     print(f"--- Results: {passed} Passed | {failed} Failed ---\n")
     return failed == 0
+
+
+
+
+def plot_learning_development(epochs, losses, control_magnitudes):
+    """
+    Generates a live plot of the training loss and control mechanism magnitude over epochs to
+    visualize the learning dynamics of the target propagation algorithm.
+    """
+    # Set scientific aesthetic
+    sns.set_theme(style="ticks", context="paper", font_scale=1.2)
+    
+    # Create a 1x2 grid of plots
+    fig, axes = plt.subplots(1, 2, figsize=(8, 2.5), dpi=150)
+    
+    # --- Plot 1: Training Loss ---
+    axes[0].plot(epochs, losses, color='#1f77b4', linewidth=2, marker='o', markersize=4)
+    axes[0].set_title('Network Convergence (MSE)', fontweight='bold', pad=15)
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('Training Loss')
+    axes[0].spines['top'].set_visible(False)
+    axes[0].spines['right'].set_visible(False)
+    axes[0].grid(True, linestyle='--', alpha=0.7)
+    
+    # --- Plot 2: Control Mechanism Development ---
+    axes[1].plot(epochs, control_magnitudes, color='#d62728', linewidth=2, marker='s', markersize=4)
+    axes[1].set_title('Control Magnitude', fontweight='bold', pad=15)
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('Mean Absolute Control Signal')
+    axes[1].spines['top'].set_visible(False)
+    axes[1].spines['right'].set_visible(False)
+    axes[1].grid(True, linestyle='--', alpha=0.7)
+    
+    # Add a descriptive suptitle
+    fig.suptitle('Training Loss and Control Magnitude Over Time', fontsize=10, y=1.05)
+    
+    plt.tight_layout()
+    plt.show()
