@@ -13,6 +13,7 @@ class Network(nn.Module):
     def __init__(self, pop_sizes):
         super().__init__()
         
+        # Note that pop[0] referrs to the first hidden layer, not the input layer
         self.populations = nn.ModuleList([
             NeuralPopulation(pop_sizes[i], pop_sizes[i+1])
             for i in range(len(pop_sizes) - 1)
@@ -24,7 +25,8 @@ class Network(nn.Module):
         - If control_signals is None, it acts as the Baseline Pass (c_n = 0).
         - If save_baseline=True, it locks in the baseline states.
         """
-        activation = sensory_inputs # make sure activation is not unbound 
+        # The firing rate based on the sensory inputs
+        activation = sensory_inputs 
 
         for i, pop in enumerate(self.populations):
             # 1. Grab the control signal, or default to zeros for baseline
@@ -69,7 +71,7 @@ class NeuralPopulation(nn.Module):
     def dendritic_proc(self, c_n):
         return torch.sigmoid(c_n) - 0.5  # Range is now [-0.5, 0.5]
 
-    def sensory_proc(self, sensory_inputs):
+    def bottom_up_proc(self, sensory_inputs):
         """
         Gets the sensory inputs and sums them up (z_n). The total bottom-up input for our current neuron (neuron n) is 
         the activation of a neuron from the previous layer (neuron m) times their connecting weight (wmn​), summed up across 
@@ -83,11 +85,11 @@ class NeuralPopulation(nn.Module):
     def firing_rate(self, sensory_inputs, c_n, beta=1.0):
         """
         Calculates the final firing rate of the neuron by combining the bottom-up 
-        sensory drive with the top-down dendritic modulation.
+        drive with the top-down dendritic modulation.
         """
-        # 1. Get the bottom-up sensory activation
-        phi_z = self.sensory_proc(sensory_inputs)
-
+        # 1. Get the bottom-up activation
+        phi_z = self.bottom_up_proc(sensory_inputs)
+        
         # 2. Get the top-down apical activation
         q_c = self.dendritic_proc(c_n)
         
@@ -95,4 +97,5 @@ class NeuralPopulation(nn.Module):
         r = (beta * q_c + 1) * phi_z 
         
         return r
+    
     

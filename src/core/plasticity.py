@@ -19,7 +19,7 @@ class Plasticity:
     def learning_rule(self, a_pre, a_baseline, a_controlled):  
         # 1. Calculate the difference between the target activation and baseline activation
         # Shape: [batch_size, num_neurons]
-        errors = a_controlled - a_baseline 
+        errors = a_controlled - a_baseline
         
         # 2. Matrix multiplication to get the outer product, summing across the batch
         # errors.T shape: [num_neurons, batch_size]
@@ -32,7 +32,7 @@ class Plasticity:
         return delta_W / batch_size
 
     @torch.no_grad() # Turn off gradients since we are doing manual weight updates
-    def train_single_step(self, network, sensory_inputs): 
+    def update_weights(self, network, sensory_inputs): 
         """
         Applies the learning rule to every population in the network.
         This must be called AFTER the ControlMechanism has found c* and 

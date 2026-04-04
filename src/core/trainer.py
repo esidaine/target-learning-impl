@@ -31,6 +31,7 @@ class Trainer:
         epoch_control_magnitude = 0.0 
         
         for batch_idx, (sensory_inputs, target_y) in enumerate(dataloader):
+
             # ==========================================
             # 1. THE BASELINE & CONTROL PHASE
             # ==========================================
@@ -41,6 +42,8 @@ class Trainer:
                 target_y=target_y, 
                 network=self.network
             )
+
+
             # Calculate the mean absolute magnitude of the control signals across all layers
             with torch.no_grad():
                 batch_c_mag = sum(torch.abs(c).mean().item() for c in optimal_controls) / len(optimal_controls)
@@ -50,7 +53,7 @@ class Trainer:
             # 2. THE PLASTICITY PHASE
             # ==========================================
             # The weights are updated based on the difference between a_controlled and a_baseline.
-            self.plasticity.train_single_step(
+            self.plasticity.update_weights(
                 network=self.network, 
                 sensory_inputs=sensory_inputs
             )

@@ -4,8 +4,17 @@ import torch
 import torch.nn as nn
 sys.path.append(os.path.abspath('..'))
 from src.utils.utils import get_logger
+from src.core.euler_integrators import ControlErrorIntegrator
+from dataclasses import dataclass
 
 logger = get_logger()
+
+@dataclass
+class OptimizationMetrics:
+    initial_loss: float = float('inf')
+    final_loss: float = float('inf')
+    steps_taken: int = 0
+    converged: bool = False
 
 
 class ControlMechanism: 
@@ -13,7 +22,8 @@ class ControlMechanism:
     Generates the control signal (c_n) (per neuron) and finds the optimal control signal (c_n*) that allows the neuron to converge to the target firing rate (a_target).
     Has two implementations: with backpropagation and with PID control 
     """
-    def __init__(self, mode='backprop', lr_c=0.1, max_steps=50):
+    def __init__(self, mode='backprop', lr_c=0.1, max_steps=50, 
+                 dt=0.1, tau=1.0, alpha=0.1, k_p=1.0):
         
         # Determine which control algorithm to use
         self.mode = mode 
@@ -24,7 +34,10 @@ class ControlMechanism:
         self.tolerance = 0.001        # Convergence threshold [!] Should be reconsidered or tuned
         
         # --- PID Controller Parameters ---
-        #TODO
+        self.dt = 0.1
+        self.tau = 1.0
+        self.alpha = 0.1 # The leak (prevents integral from exploding to infinity)
+        self.k_p = 1.0   # Proportional gain
 
     def initialize_controls(self, batch_size, neuron_populations):
         """
@@ -61,14 +74,15 @@ class ControlMechanism:
         # We use torch.no_grad() because the baseline guess requires no optimization.
         # This prevents PyTorch from building a useless computational graph.
         with torch.no_grad():
-            network(sensory_inputs, control_signals=None, save_baseline=True)
+            baseline_pred = network(sensory_inputs, control_signals=None, save_baseline=True)
 
         # ==========================================
         # STEP 2: INITIALIZE CONTROLS TO BE TUNED
         # ==========================================
         # Create the list of c_n tensors that will be tuned and where gradients will be tracked.
+        # Each batch of sensory inputs will have its own control signal for each population (first hidden layer, second hidden layer, etc.)
         control_signals = self.initialize_controls(batch_size, network.populations)
-
+    
         # ==========================================
         # STEP 3: THE OPTIMIZATION PHASE
         # ==========================================
@@ -80,7 +94,7 @@ class ControlMechanism:
         if self.mode == 'backprop':
             return self._optimize_via_backprop(control_signals, sensory_inputs, target_y, network)
         elif self.mode == 'pid':
-            return self._optimize_via_pid(control_signals, sensory_inputs, target_y, network)
+            return self._optimize_via_pid(control_signals, sensory_inputs, target_y, network, baseline_pred)
         else:
             raise ValueError("Mode must be 'backprop' or 'pid'")
         
@@ -91,13 +105,10 @@ class ControlMechanism:
 
         # Loss function (Mean Squared Error denotes averaging over the errors f(x) - y squared (per data point) across the batch)
         criterion = nn.MSELoss()
-
-        final_loss = float('inf') 
-        initial_loss = float('inf')
-        steps_taken = 0
+        metrics = OptimizationMetrics()
         
         for step in range(self.max_steps):
-            steps_taken = step + 1
+            metrics.steps_taken = step + 1
 
             # 1. Zero the gradients for c_n
             c_optimizer.zero_grad()
@@ -109,11 +120,11 @@ class ControlMechanism:
             # 3. Calculate how far off we are from the target
             loss = criterion(y_pred, target_y)
             if step == 0:
-                initial_loss = loss.item() # Store the initial loss for monitoring improvement
-            final_loss = loss.item()
+                metrics.initial_loss = loss.item() # Store the initial loss for monitoring improvement
+            metrics.final_loss = loss.item()
 
             # 4. Check for early convergence
-            if final_loss < self.tolerance:
+            if metrics.final_loss < self.tolerance:
                 logger.debug(f"Converged at step {step} with loss {loss.item()}")
                 break
 
@@ -123,9 +134,9 @@ class ControlMechanism:
             # 6. Take a step to update c_n
             c_optimizer.step()
 
-        improvement = initial_loss - final_loss
-        if steps_taken == self.max_steps and improvement <= 0.001: 
-            logger.warning(f" [!] Control Optimization struggled!  {initial_loss:.4f} -> {final_loss:.4f} in {steps_taken} steps.")
+        improvement = metrics.initial_loss - metrics.final_loss
+        if metrics.steps_taken == self.max_steps and improvement <= 0.001: 
+            logger.warning(f" [!] Control Optimization struggled!  {metrics.initial_loss:.4f} -> {metrics.final_loss:.4f} in {metrics.steps_taken} steps.")
 
         # Clean up memory 
         for pop in network.populations:
@@ -137,9 +148,41 @@ class ControlMechanism:
         return [c_n.detach() for c_n in control_signals]
        
     @torch.no_grad() # Turn off PyTorch autograd for PID
-    def _optimize_via_pid(self, c_n, sensory_inputs, target_y, network):
-        #TODO
-        return c_n
+    def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred):
+        metrics = OptimizationMetrics()
+
+        # Get the general leaky integrator that handles the change of neural activation per time step via Euler integration.
+        self.stepper = ControlErrorIntegrator(dt=self.dt, tau=self.tau, alpha=self.alpha)
+
+        # Every single neuron in the layer/population needs its own independent memory of its errors.
+        # control_signals is a list of tensors, where each tensor represents one layer
+        c_integrals = [torch.zeros_like(c) for c in control_signals]
+
+        # Initialize y_pred with the control-free baseline measurement we already took
+        # shape [batch_size, num_output_neurons]
+        y_pred = baseline_pred
+
+        for step in range(self.max_steps):
+            metrics.steps_taken = step + 1
+
+            # ==========================================
+            # 1. CALCULATE ERROR and EARLY EXIT
+            # ==========================================
+            # TODO
+
+            # ==========================================
+            # 2. UPDATE CONTROL SIGNALS USING PID
+            # ==========================================
+            # TODO
+
+            # ==========================================
+            # 3. SIMULATE THE NETWORK WITH THE NEW CONTROL SIGNALS
+            # ==========================================
+            y_pred = network(sensory_inputs, control_signals=control_signals, save_baseline=False)
+
+        return control_signals
+    
+   
 
         
 
