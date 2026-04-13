@@ -5,6 +5,7 @@ import os
 import sys
 sys.path.append(os.path.abspath('..'))
 from src.utils.utils import get_logger
+from typing import Optional
 
 logger = get_logger()
 
@@ -14,7 +15,7 @@ class Network(nn.Module):
         super().__init__()
         
         # Note that pop[0] referrs to the first hidden layer, not the input layer
-        self.populations = nn.ModuleList([
+        self.populations: nn.ModuleList = nn.ModuleList([
             NeuralPopulation(pop_sizes[i], pop_sizes[i+1])
             for i in range(len(pop_sizes) - 1)
         ])
@@ -54,8 +55,7 @@ class Network(nn.Module):
 class NeuralPopulation(nn.Module):
     def __init__(self, num_inputs, num_neurons):
         """
-        Represents a group of neurons.
-        Builds the anatomy and processing rules for a single neuron, which can be replicated across the population.
+        Represents a group of Multi-Compartment neurons with specific anatomy and processing rules of top-down and bottom-up input.
         """
         super().__init__()
         self.num_neurons = num_neurons
@@ -63,6 +63,8 @@ class NeuralPopulation(nn.Module):
         # 1. HOLDING WEIGHTS, disable biases and gradient tracking
         self.W = nn.Linear(num_inputs, num_neurons, bias=False)
         self.W.weight.requires_grad = False
+
+        self.z: Optional[torch.Tensor] = None # Bottom Up 
         
         # 2. INITIALIZING STATE MEMORY 
         self.a_baseline = None # Activation for the first guess
@@ -78,7 +80,9 @@ class NeuralPopulation(nn.Module):
         all the neurons in that previous layer. Then applies leaky ReLU activation function. 
         """
         # Multiply the inputs by the weights, identical to: z = np.dot(sensory_inputs, weights) 
-        z = self.W(sensory_inputs) 
+        z = self.W(sensory_inputs)
+        # Store z for later use
+        self.z = z  
         # Apply leaky relu function
         return F.leaky_relu(z, negative_slope=0.01)
 
@@ -98,4 +102,47 @@ class NeuralPopulation(nn.Module):
         
         return r
     
+    def get_activation_derivatives(self): 
+        """
+        This function calculates the derivative of the bottom-up (Leaky ReLU) activation function.
+            If z>0, the output is z. (The slope/derivative is 1).
+            If z≤0, the output is 0.01⋅z. (The slope/derivative is 0.01).
+
+        When calculating the chain rule to pass your top-down control signal (Ψ) backward, 
+        you must multiply the signal by this derivative.
+        """
+        if self.z is None:
+            raise RuntimeError("Cannot compute derivative: forward pass hasn't occurred yet - z is still None.")
+        derivative = torch.ones_like(self.z) # Start with a tensor of ones
+        derivative[self.z <= 0] = 0.01 # Set the slope to 0.01 where z <= 0 using masking
+        return derivative
+    
+    def compute_control_targets_dfc(self, output_error):
+        """
+        Computes how much to nudge the apical control signals so that the network produces the correct output. by routing the 
+        signal backward through the network using the Chain Rule of Calculus. Note that the wights are frozen. 
+
+        To find the target state (Psi_i) for a given hidden layer 'i', this 
+        function combines three key ingredients:
+          1. Psi_{i+1} : The target state of the layer immediately above it.
+          2. W_{i+1}   : The synaptic weights connecting layer i to layer i+1.
+          3. f'(z_i)   : The derivative of the activation function at layer i, 
+                         evaluated at its pre-activation voltage (z_i).
+
+        The universal equation executed across the layers is:
+            Psi_i = (Psi_{i+1} @ W_{i+1}^T) * f'(z_i)
+
+        Where:
+          - '@' represents matrix multiplication (dot product).
+          - 'W^T' is the transpose of the forward weight matrix.
+          - '*' represents element-wise multiplication.
+        """
+        # Counts the number of hidden layers to know how deep the network is
+        L = len(self.populations) 
+        # Creating a fixed array of slots for storing the target controls, slot with idx 0 corresponds to the first hidden layer etc. 
+        control_targets = [None] * L
+
+        # Pre-compute f'(z), the activation derivatives for all layers/populations
+        f_primes = [pop.get_activation_derivative() for pop in self.populations] 
+
     

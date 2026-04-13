@@ -71,6 +71,7 @@ class ControlMechanism:
         # which we don't in this simple model, but good practice for future extensions)
         network.eval() 
 
+        # Data goes in, flows through the frozen W, and makes a prediction.
         # We use torch.no_grad() because the baseline guess requires no optimization.
         # This prevents PyTorch from building a useless computational graph.
         with torch.no_grad():
@@ -129,6 +130,7 @@ class ControlMechanism:
                 break
 
             # 5. Backpropagate the error to calculate gradients with respect to c_n
+            # Note that we multiply the output error by the transpose of the weights (W.T) - weight symmetry!
             loss.backward()
             
             # 6. Take a step to update c_n
@@ -147,8 +149,18 @@ class ControlMechanism:
         # We detach them because we are done optimizing them and don't want to carry the computational graph forward.
         return [c_n.detach() for c_n in control_signals]
        
-    @torch.no_grad() # Turn off PyTorch autograd for PID
+    @torch.no_grad() # Turn off PyTorch autograd for PID. That means we won't use W.T for the feedback
     def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred):
+        """
+            The controller pushes (u), the neurons move (v or r), the controller checks the new output, 
+            and pushes again. This happens continuously over your max_steps loop. 
+            It is a dynamical system settling into an equilibrium.
+            The controller knows the global error. This is multiplied by the feedback weights,
+            shattering the global error into thousands of specific, localized control signals (cn​),
+            to every single hidden neuron simultaneously.
+            The hidden neurons have no idea what the global error is, but they do know their own control signal. 
+        
+        """
         metrics = OptimizationMetrics()
 
         # Get the general leaky integrator that handles the change of neural activation per time step via Euler integration.
@@ -161,22 +173,43 @@ class ControlMechanism:
         # Initialize y_pred with the control-free baseline measurement we already took
         # shape [batch_size, num_output_neurons]
         y_pred = baseline_pred
-
+        
+        # Dynamic inversion: 
+        # Finding the ideal activation state for each neuron to match the final output target
+        # It finds this state incrementally by nudging the control signal over time until the physical simulation settles
         for step in range(self.max_steps):
             metrics.steps_taken = step + 1
 
             # ==========================================
-            # 1. CALCULATE ERROR and EARLY EXIT
+            # 1. CALCULATE ERROR 
+            # ==========================================
+            # Both y have the same shape, so subtracting them gives us a vector of raw errors
+            # for each output neuron, for each data point in the batch.
+            output_error = target_y - y_pred 
+
+            # ==========================================
+            # 2. EARLY EXIT
+            # ==========================================
+            mse_loss = torch.mean(output_error ** 2).item()
+            if step == 0:
+                metrics.initial_loss = mse_loss
+            metrics.final_loss = mse_loss
+            
+            if mse_loss < self.tolerance:
+                logger.debug(f"PID Converged at step {step} with loss {mse_loss}")
+                break
+            # ==========================================
+            # 3. ROUTE THAT ERROR BACKWARDS TO COMPUTE THE LOCAL CONTROL TARGETS
+            # ==========================================
+            control_targets = network.compute_control_targets_dfc(output_error)
+
+            # ==========================================
+            # 4. PUSH CONTROL SIGNALS TOWARDS TARGETS USING PID (leaky integrators)
             # ==========================================
             # TODO
 
             # ==========================================
-            # 2. UPDATE CONTROL SIGNALS USING PID
-            # ==========================================
-            # TODO
-
-            # ==========================================
-            # 3. SIMULATE THE NETWORK WITH THE NEW CONTROL SIGNALS
+            # 5. SIMULATE A FORWARD PASS WITH THE NEW CONTROL SIGNALS
             # ==========================================
             y_pred = network(sensory_inputs, control_signals=control_signals, save_baseline=False)
 
