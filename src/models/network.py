@@ -20,6 +20,57 @@ class Network(nn.Module):
             for i in range(len(pop_sizes) - 1)
         ])
 
+    def get_local_controls(self, global_control):
+            """
+            Computes local control signals (c_n) so that the network produces the correct output. By routing the 
+            signal backward through the network using the Chain Rule. Note that the wights are frozen. 
+
+            Finds the target state (Psi_i) for the neurons in a given hidden layer 'i'
+
+            The universal equation executed across the layers is:
+                Psi_i = (Psi_{i+1} @ W_{i+1}^T) * f'(z_i)
+
+            Where:
+            - '@' represents matrix multiplication (dot product).
+            - 'W^T' is the transpose of the forward weight matrix.
+            - '*' represents element-wise multiplication.
+            """
+            # Counts the number of hidden layers to know how deep the network is
+            L = len(self.populations) 
+
+            # Creating a fixed array of slots for storing the target controls, slot with idx 0 corresponds to the first hidden layer etc. 
+            control_targets = [None] * L
+
+            # Pre-compute f'(z), the activation derivatives for all neurons per layers/populations
+            neuron_sensitivities = [pop.get_bottom_up_activation_derivatives() for pop in self.populations] 
+
+            backward_signal = global_control # This is the initial signal that we want to propagate backward
+
+            # Traverse backwards from the output layer to the first hidden layer
+            for i in reversed(range(L)):
+                # Get the sensitivities f' for the current layer/ population
+                layer_sensitivity = neuron_sensitivities[i]
+
+                if i == L - 1:
+                    layer_target_controls = backward_signal * layer_sensitivity
+
+                else:
+                    # TODO W_next = ? 
+
+                    # We take the message from the layer above and push it backward through the feedback wiring
+                    # We multiply the signal by the neuron's sensitivity
+                    layer_target_controls = torch.matmul(backward_signal, W_next) * layer_sensitivity
+                
+                # Store the target control for this layer	
+                control_targets[i] = layer_target_controls
+
+                # Update the backward signal for the next iteration (the next layer down)
+                backward_signal = layer_target_controls 
+            
+            return control_targets	
+
+
+
     def forward(self, sensory_inputs, control_signals=None, save_baseline=False):
         """
         Passes data through the network.
@@ -51,6 +102,7 @@ class Network(nn.Module):
                 pop.a_controlled = activation
 
         return activation
+    
 
 class NeuralPopulation(nn.Module):
     def __init__(self, num_inputs, num_neurons):
@@ -102,13 +154,13 @@ class NeuralPopulation(nn.Module):
         
         return r
     
-    def get_activation_derivatives(self): 
+    def get_bottom_up_activation_derivatives(self): 
         """
         This function calculates the derivative of the bottom-up (Leaky ReLU) activation function.
             If z>0, the output is z. (The slope/derivative is 1).
             If z≤0, the output is 0.01⋅z. (The slope/derivative is 0.01).
 
-        When calculating the chain rule to pass your top-down control signal (Ψ) backward, 
+        When calculating the chain rule to pass your top-down control signal backward, 
         you must multiply the signal by this derivative.
         """
         if self.z is None:
@@ -117,32 +169,6 @@ class NeuralPopulation(nn.Module):
         derivative[self.z <= 0] = 0.01 # Set the slope to 0.01 where z <= 0 using masking
         return derivative
     
-    def compute_control_targets_dfc(self, output_error):
-        """
-        Computes how much to nudge the apical control signals so that the network produces the correct output. by routing the 
-        signal backward through the network using the Chain Rule of Calculus. Note that the wights are frozen. 
-
-        To find the target state (Psi_i) for a given hidden layer 'i', this 
-        function combines three key ingredients:
-          1. Psi_{i+1} : The target state of the layer immediately above it.
-          2. W_{i+1}   : The synaptic weights connecting layer i to layer i+1.
-          3. f'(z_i)   : The derivative of the activation function at layer i, 
-                         evaluated at its pre-activation voltage (z_i).
-
-        The universal equation executed across the layers is:
-            Psi_i = (Psi_{i+1} @ W_{i+1}^T) * f'(z_i)
-
-        Where:
-          - '@' represents matrix multiplication (dot product).
-          - 'W^T' is the transpose of the forward weight matrix.
-          - '*' represents element-wise multiplication.
-        """
-        # Counts the number of hidden layers to know how deep the network is
-        L = len(self.populations) 
-        # Creating a fixed array of slots for storing the target controls, slot with idx 0 corresponds to the first hidden layer etc. 
-        control_targets = [None] * L
-
-        # Pre-compute f'(z), the activation derivatives for all layers/populations
-        f_primes = [pop.get_activation_derivative() for pop in self.populations] 
+    
 
     

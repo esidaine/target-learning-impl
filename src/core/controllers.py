@@ -169,8 +169,8 @@ class ControlMechanism:
         batch_size = sensory_inputs.size(0)
         output_size = target_y.size(1)
 
-        current_controls = control_signals # This is the current control signal (c_n) that we will update iteratively
-        current_controls_integral = torch.zeros(batch_size, output_size)
+        global_control = torch.zeros(batch_size, output_size) # This is the global control signal that we will update iteratively
+        global_control_integral = torch.zeros(batch_size, output_size)
 
         # Initialize y_pred with the control-free baseline measurement we already took
         # shape [batch_size, num_output_neurons]
@@ -202,22 +202,21 @@ class ControlMechanism:
                 break
             
             # ==========================================
-            # 3. UPDATE CONTROL SIGNAL, step in time 
+            # 3. UPDATE GLOBAL CONTROL SIGNAL, STEP IN TIME
             # ==========================================
-            current_controls_integral, current_controls = control_stepper.step(current_controls, current_controls_integral, output_error) 
+            global_control_integral, global_control = control_stepper.step(global_control, global_control_integral, output_error) 
 
             # ==========================================
-            # 4. BACKWARD PASS using feedback weights Q
+            # 4. CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD 
             # ==========================================
-            # TODO
+            local_controls = network.get_local_controls(global_control)
 
             # ==========================================
             # 5. SIMULATE A FORWARD PASS 
             # ==========================================
-            y_pred = network(sensory_inputs, control_signals=current_controls, save_baseline=False)
+            y_pred = network(sensory_inputs, control_signals=local_controls, save_baseline=False)
 
-        return current_controls
-    
+        return global_control
    
 
         
