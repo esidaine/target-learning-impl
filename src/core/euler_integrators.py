@@ -13,8 +13,8 @@ class FiringRateDynamics:
     def step(self, current_a, target_a):
         """
         Calculates the next state of activation.
-        v_current: v_controlled at time t
-        v_target: the modulated firing rate phi(z_n, c_n) to optimality
+        current_a: r_controlled at time t
+        target_a: the modulated firing rate phi(z_n, c_n) to optimality
         """
         # 1. Change of Neural Activation per time step based on the difference between current activation and target firing rate
         delta_a = (self.dt / self.tau) * (target_a - current_a)
@@ -34,7 +34,7 @@ class ControlErrorIntegrator:
     to prevent the integral from exploding to infinity.
     """
     def __init__(self, dt=0.1, tau=1.0, alpha=0.1, k_p=0.05):
-        self.dt = dt
+        self.dt = dt # dt must be significantly smaller than tau for Euler integration to be stable 
         self.tau = tau # ! Neuron tau and controller tau need to be aligned
         self.alpha = alpha
         self.k_p = k_p # Proportional gain 

@@ -165,12 +165,13 @@ class ControlMechanism:
 
         control_stepper =  ControlErrorIntegrator(dt=0.1, tau=1.0, alpha=0.1, k_p=0.05) # Parameters need to be changed or reconsidered
 
-        # Track the the global error of the output layer 
+        # Track the global error of the output layer 
         batch_size = sensory_inputs.size(0)
         output_size = target_y.size(1)
 
         global_control = torch.zeros(batch_size, output_size) # This is the global control signal that we will update iteratively
         global_control_integral = torch.zeros(batch_size, output_size)
+        local_controls = control_signals # All zeros at the start
 
         # Initialize y_pred with the control-free baseline measurement we already took
         # shape [batch_size, num_output_neurons]
@@ -199,6 +200,11 @@ class ControlMechanism:
             
             if mse_loss < self.tolerance:
                 logger.debug(f"PID Converged at step {step} with loss {mse_loss}")
+
+                # If we break before taking any physical steps, we must run one dummy pass so the network initializes 
+                # `a_controlled` for the Plasticity class to calculate the weight update (which is zero)
+                if step == 0:
+                    network(sensory_inputs, control_signals=local_controls, save_baseline=False, dynamic_step=True)
                 break
             
             # ==========================================
@@ -214,9 +220,11 @@ class ControlMechanism:
             # ==========================================
             # 5. SIMULATE A FORWARD PASS 
             # ==========================================
-            y_pred = network(sensory_inputs, control_signals=local_controls, save_baseline=False)
+            y_pred = network(sensory_inputs, control_signals=local_controls, save_baseline=False, dynamic_step=True)
 
-        return global_control
+        if local_controls is None:
+            logger.warning("PID optimization did not produce any local controls. ")
+        return local_controls
    
 
         

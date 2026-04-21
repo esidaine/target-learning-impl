@@ -1,14 +1,24 @@
-import os
+import torch
+import os 
 import sys
 
-#sys.path.append(os.path.abspath('..'))
+# ==========================================
+# TURN ON ANOMALY DETECTION FOR DEBUGGING
+# It watches every single mathematical operation in real-time. 
+# When a tensor becomes NaN or Inf, PyTorch instantly freezes the program and throws an error.
+# torch.autograd.set_detect_anomaly(True)
+# ==========================================
+
 from src.models.network import Network
 from src.core.controllers import ControlMechanism
 from src.core.plasticity import Plasticity
 from src.xor.dataset import get_dataloader
 from src.core.trainer import Trainer
-from src.utils.utils import set_all_seeds, save_experiment
+from src.utils.utils import set_all_seeds, save_experiment, get_weight_metrics
 from IPython.display import clear_output
+from src.utils.utils import get_logger
+
+logger = get_logger()
 
 from tqdm import tqdm
 import wandb
@@ -16,7 +26,7 @@ import wandb
 def main():
     set_all_seeds(7)
     task = "xor"  # Define the task (for documentation and saving purposes)
-    epochs = 550
+    epochs = 400
 
     wandb_on = True  # Set to True to enable W&B logging
 
@@ -24,7 +34,7 @@ def main():
     network = Network(pop_sizes=[2, 4, 1])
 
     # 2. Initialize Mechanics
-    controller = ControlMechanism(mode='backprop', lr_c=0.1, max_steps=60)
+    controller = ControlMechanism(mode='pid', lr_c=0.1, max_steps=60)
     plasticity = Plasticity(lr_theta=0.2)
 
     # 3. Initialize variables, pbar and objects for training
@@ -36,7 +46,6 @@ def main():
 
     if wandb_on:
         wandb.init(project="target-learning", name=f"{task}_{controller.mode}_training_run")
-        print("W&B Initialized! Starting training loop...")
     
     # Initialize tqdm progress bar
     progress_bar = tqdm(range(epochs), desc="Learning")
@@ -46,30 +55,37 @@ def main():
         current_avg_loss, avg_control_mag = trainer.train_one_epoch(dataloader, epoch)
 
         # Checkpoint: Save if this is the best model so far
-        best_loss = current_avg_loss
-        save_experiment(
-            network=network, 
-            controller=controller, 
-            plasticity=plasticity, 
-            epoch=epoch, 
-            loss=current_avg_loss, 
-            task=task, 
-            is_best=True    # This overwrites the "best_model" file
-        )
+        if current_avg_loss < best_loss:
+            best_loss = current_avg_loss
+            save_experiment(
+                network=network, 
+                controller=controller, 
+                plasticity=plasticity, 
+                epoch=epoch, 
+                loss=current_avg_loss, 
+                task=task
+            )
 
         progress_bar.set_postfix({
             "Loss": f"{current_avg_loss:.4f}", 
             "Best": f"{best_loss:.4f}"
         })
 
-        if wandb_on:
-            wandb.log({"Training Loss": current_avg_loss, "Control Magnitude": avg_control_mag}, step=epoch)
+        if wandb.run is not None:
+            wandb_metrics = {
+            "Training Loss": current_avg_loss,
+            "Control Magnitude": avg_control_mag
+            }
+            wandb_metrics.update(get_weight_metrics(network))
+            wandb.log(wandb_metrics, step=epoch)
+        elif wandb_on: 
+            logger.warning("W&B logging is enabled but no active run found. Metrics will not be logged to W&B.")
 
-    save_experiment(network, controller, plasticity, epochs, current_avg_loss, task, is_best=False)
     print(f"\n✅ Training Complete! Best model saved with loss {best_loss:.4f}")
 
     # Cleanly close the W&B run
-    wandb.finish()
+    if wandb.run is not None:
+        wandb.finish()
 
 if __name__ == "__main__":
     main()

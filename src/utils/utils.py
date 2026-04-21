@@ -10,19 +10,31 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import wandb
 
+def get_weight_metrics(network): 
+    """
+    Extracts weight norms and histograms for W&B logging.
+    Returns a dictionary of metrics.
+    """
+    metrics = {}
+    for i, pop in enumerate(network.populations):
+        weights = pop.W.weight.detach().cpu()
+        
+        metrics[f"Weight_Norms/Pop_{i}"] = weights.norm().item()
+        metrics[f"Weight_Histograms/Pop_{i}"] = wandb.Histogram(weights.numpy())
+        
+    return metrics
 
-def save_experiment(network, controller, plasticity, epoch, loss, task, save_dir="weights", is_best=False):
+
+def save_experiment(network, controller, plasticity, epoch, loss, task):
     """
     Saves the model weights and experiment metadata.
     """
     # 1. Create a dedicated directory if it doesn't exist
+    save_dir = "weights"
     os.makedirs(save_dir, exist_ok=True)
-    
-    # 2. If it's the best model, overwrite the single 'best' file. Otherwise, save a 'latest' file.
-    if is_best:
-        base_filename = f"{task}_{controller.mode}_best_model"
-    else:
-        base_filename = f"{task}_{controller.mode}_latest_model"
+
+    json_filename = f"{task}_{controller.mode}_best_model_meta.json"
+    json_path = os.path.join(save_dir, json_filename)
     
     # 3. Harvest the Hyperparameters (The "Context")
     hyperparameters = {
@@ -49,8 +61,6 @@ def save_experiment(network, controller, plasticity, epoch, loss, task, save_dir
     }
 
     # 5. Save the pure JSON metadata (For human readability and quick scanning)
-
-    json_path = os.path.join(save_dir, f"{base_filename}_meta.json")
     with open(json_path, 'w') as f:
         json.dump(hyperparameters, f, indent=4)
 
@@ -59,7 +69,8 @@ def save_experiment(network, controller, plasticity, epoch, loss, task, save_dir
         "hyperparameters": hyperparameters,
         "model_state": model_state
     }
-    pth_path = os.path.join(save_dir, f"{base_filename}.pth")
+    pth_filename = f"{task}_{controller.mode}_best_model_meta.pth"
+    pth_path = os.path.join(save_dir, pth_filename)
     torch.save(checkpoint, pth_path)
     # Tell W&B to upload these specific files to the cloud! ---
     if wandb.run is not None:  # Check if W&B is active
@@ -145,3 +156,69 @@ def test_function(func, test_cases, tolerance=1e-5):
             
     print(f"--- Results: {passed} Passed | {failed} Failed ---\n")
     return failed == 0
+
+
+
+import matplotlib.pyplot as plt
+import torch
+from src.core.euler_integrators import ControlErrorIntegrator
+
+def debug_dynamical_settling(network, controller, sensory_inputs, target_y):
+    """
+    Run this function on a single batch (or single data point) to visualize 
+    if your dt, tau, and k_p are mathematically stable.
+    """
+    network.eval()
+    
+    # Tracking lists
+    errors = []
+    control_magnitudes = []
+    neuron_activations = []
+
+    with torch.no_grad():
+        baseline_pred = network(sensory_inputs, control_signals=None, save_baseline=True)
+
+    # Initialize Controller variables
+    batch_size = sensory_inputs.size(0)
+    output_size = target_y.size(1)
+    global_control = torch.zeros(batch_size, output_size)
+    global_control_integral = torch.zeros(batch_size, output_size)
+    control_stepper = ControlErrorIntegrator(dt=0.1, tau=1.0, alpha=0.1, k_p=0.05)
+    
+    y_pred = baseline_pred
+
+    for step in range(100): # Force a longer run to see the full curve
+        output_error = target_y - y_pred 
+        mse_loss = torch.mean(output_error ** 2).item()
+        
+        # Step the controller
+        global_control_integral, global_control = control_stepper.step(
+            global_control, global_control_integral, output_error) 
+        
+        # Step the network
+        local_controls = network.get_local_controls(global_control)
+        y_pred = network(sensory_inputs, control_signals=local_controls, save_baseline=False, dynamic_step=True)
+
+        # --- LOGGING ---
+        errors.append(mse_loss)
+        control_magnitudes.append(torch.mean(torch.abs(global_control)).item())
+        
+        # Track a specific neuron in the first hidden layer to see its physical movement
+        tracked_neuron_state = network.populations[0].a_controlled[0, 0].item() # [0, 0] grabs the first neuron in the first population
+        neuron_activations.append(tracked_neuron_state)
+
+    # --- PLOTTING ---
+    fig, axs = plt.subplots(3, 1, figsize=(10, 8))
+    
+    axs[0].plot(errors, color='red')
+    axs[0].set_title('Global MSE Error (Should smoothly drop to near 0)')
+    
+    axs[1].plot(control_magnitudes, color='blue')
+    axs[1].set_title('Global Control Signal Magnitude (Should increase and not explode)')
+    
+    axs[2].plot(neuron_activations, color='green')
+    axs[2].set_title('Single Neuron Physical State (a_controlled)')
+    axs[2].set_xlabel('Integration Steps')
+    
+    plt.tight_layout()
+    plt.show()
