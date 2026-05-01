@@ -9,14 +9,14 @@ import sys
 # torch.autograd.set_detect_anomaly(True)
 # ==========================================
 
-from src.models.network import Network
-from src.core.controllers import ControlMechanism
-from src.core.plasticity import Plasticity
-from src.xor.dataset import get_dataloader
-from src.core.trainer import Trainer
-from src.utils.utils import set_all_seeds, save_experiment, get_weight_metrics
+from models.network import Network
+from core.controllers import ControlMechanism
+from core.plasticity import Plasticity
+from xor.dataset import get_dataloader
+from core.trainer import Trainer
+from utils.utils import set_all_seeds, save_experiment, get_weight_metrics
 from IPython.display import clear_output
-from src.utils.utils import get_logger
+from utils.utils import get_logger
 
 logger = get_logger()
 
@@ -26,7 +26,7 @@ import wandb
 def main():
     set_all_seeds(7)
     task = "xor"  # Define the task (for documentation and saving purposes)
-    epochs = 400
+    epochs = 320
 
     wandb_on = True  # Set to True to enable W&B logging
 
@@ -52,7 +52,7 @@ def main():
 
     # 4. Train
     for epoch in progress_bar:
-        current_avg_loss, avg_control_mag = trainer.train_one_epoch(dataloader, epoch)
+        current_avg_loss, avg_control_mag = trainer.train_one_epoch(dataloader)
 
         # Checkpoint: Save if this is the best model so far
         if current_avg_loss < best_loss:

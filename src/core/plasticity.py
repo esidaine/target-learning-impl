@@ -1,8 +1,8 @@
 import torch
 import os
 import sys
-sys.path.append(os.path.abspath('..'))
-from src.utils.utils import get_logger
+# sys.path.append(os.path.abspath('..'))
+from utils.utils import get_logger
 
 logger = get_logger()
 
@@ -41,21 +41,21 @@ class Plasticity:
 
         # Iterate over all populations/layers in the network
         for i, pop in enumerate(network.populations):
-            # 1. Determine the presynaptic input (a_m) for this specific population
+            # 1. Determine the presynaptic input for this specific population
+           
             if i == 0:
                 # For the first layer, the presynaptic inputs are the raw sensory data (images)
                 a_pre = sensory_inputs
             else:
-                # For deeper layers, the presynaptic inputs are the baseline activations from the previous layer
-                a_pre = network.populations[i-1].a_baseline
+                # For deeper layers, the presynaptic inputs are the CONTROLLED activations from the previous layer
+                a_pre = network.populations[i-1].a_controlled
                 
-            # 2. Grab the saved postsynaptic states (a_n) for this population
+            # 2. Grab the saved postsynaptic states for this population
             a_base = pop.a_baseline
             a_ctrl = pop.a_controlled
             
             # 3. Calculate the weight update matrix
             delta_W = self.learning_rule(a_pre, a_base, a_ctrl)
             
-            # 4. Apply the update directly to the population's weights
-            # We use += because we want to push the baseline state TOWARDS the controlled target state
+            # 4. Apply the update to the population's weights
             pop.W.weight.data += self.lr_theta * delta_W

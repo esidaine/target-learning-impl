@@ -2,9 +2,9 @@ import os
 import sys
 import torch
 import torch.nn as nn
-sys.path.append(os.path.abspath('..'))
-from src.utils.utils import get_logger
-from src.core.euler_integrators import ControlErrorIntegrator
+# sys.path.append(os.path.abspath('..'))
+from utils.utils import get_logger
+from core.euler_integrators import ControlErrorIntegrator
 from dataclasses import dataclass
 
 logger = get_logger()
@@ -82,7 +82,7 @@ class ControlMechanism:
         # ==========================================
         # Create the list of c_n tensors that will be tuned and where gradients will be tracked.
         # Each batch of sensory inputs will have its own control signal for each population (first hidden layer, second hidden layer, etc.)
-        control_signals = self.initialize_controls(batch_size, network.populations)
+        initial_controls = self.initialize_controls(batch_size, network.populations)
     
         # ==========================================
         # STEP 3: THE OPTIMIZATION PHASE
@@ -93,9 +93,9 @@ class ControlMechanism:
         network.train()
 
         if self.mode == 'backprop':
-            return self._optimize_via_backprop(control_signals, sensory_inputs, target_y, network)
+            return self._optimize_via_backprop(initial_controls, sensory_inputs, target_y, network)
         elif self.mode == 'pid':
-            return self._optimize_via_pid(control_signals, sensory_inputs, target_y, network, baseline_pred)
+            return self._optimize_via_pid(initial_controls, sensory_inputs, target_y, network, baseline_pred)
         else:
             raise ValueError("Mode must be 'backprop' or 'pid'")
         
@@ -169,8 +169,8 @@ class ControlMechanism:
         batch_size = sensory_inputs.size(0)
         output_size = target_y.size(1)
 
-        global_control = torch.zeros(batch_size, output_size) # This is the global control signal that we will update iteratively
-        global_control_integral = torch.zeros(batch_size, output_size)
+        global_control = torch.zeros(batch_size, output_size, device=sensory_inputs.device) # This is the global control signal that we will update iteratively
+        global_control_integral = torch.zeros(batch_size, output_size, device=sensory_inputs.device)
         local_controls = control_signals # All zeros at the start
 
         # Initialize y_pred with the control-free baseline measurement we already took

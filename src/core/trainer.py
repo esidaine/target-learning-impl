@@ -21,7 +21,7 @@ class Trainer:
         # Measures the baseline prediction where c_n​ = 0
         self.criterion = nn.MSELoss()
 
-    def train_one_epoch(self, dataloader, epoch_idx)-> tuple[float, float]:
+    def train_one_epoch(self, dataloader)-> tuple[float, float]:
         self.network.train() # mark training mode 
         epoch_loss = 0.0
 
@@ -30,7 +30,7 @@ class Trainer:
         # without needing as much top-down control.
         epoch_control_magnitude = 0.0 
         
-        for batch_idx, (sensory_inputs, target_y) in enumerate(dataloader):
+        for _, (sensory_inputs, target_y) in enumerate(dataloader):
 
             # ==========================================
             # 1. THE BASELINE & CONTROL PHASE

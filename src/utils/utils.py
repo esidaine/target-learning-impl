@@ -7,8 +7,8 @@ import inspect
 import json
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import wandb
+from core.euler_integrators import ControlErrorIntegrator
 
 def get_weight_metrics(network): 
     """
@@ -156,12 +156,6 @@ def test_function(func, test_cases, tolerance=1e-5):
             
     print(f"--- Results: {passed} Passed | {failed} Failed ---\n")
     return failed == 0
-
-
-
-import matplotlib.pyplot as plt
-import torch
-from src.core.euler_integrators import ControlErrorIntegrator
 
 def debug_dynamical_settling(network, controller, sensory_inputs, target_y):
     """

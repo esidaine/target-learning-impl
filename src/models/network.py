@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import os
 import sys
-sys.path.append(os.path.abspath('..'))
-from src.utils.utils import get_logger
+#sys.path.append(os.path.abspath('..'))
+from utils.utils import get_logger
 from typing import Optional
-from src.core.euler_integrators import FiringRateDynamics
+from core.euler_integrators import FiringRateDynamics
 
 logger = get_logger()
 
@@ -23,8 +23,7 @@ class Network(nn.Module):
 
     def get_local_controls(self, global_control):
             """
-            Computes local control signals (c_n) so that the network produces the correct output. By routing the 
-            signal backward through the network using the Chain Rule. Note that the weights are frozen. 
+            Route the global control signal backward through the network using the Chain Rule. Note that the weights are frozen. 
 
             Finds the target state (Psi_i) for the neurons in a given hidden layer 'i'
 
@@ -147,6 +146,7 @@ class NeuralPopulation(nn.Module):
         all the neurons in that previous layer. Then applies leaky ReLU activation function. 
         """
         # Multiply the inputs by the weights, identical to: z = np.dot(sensory_inputs, weights) 
+        # It is the weighted sum of presynaptic activities, before the nonlinearity
         z = self.W(sensory_inputs)
         # Store z for later use
         self.z = z  
@@ -208,6 +208,7 @@ class NeuralPopulation(nn.Module):
             raise RuntimeError("Cannot compute derivative: forward pass hasn't occurred yet - z is still None.")
         derivative = torch.ones_like(self.z) # Start with a tensor of ones
         derivative[self.z <= 0] = self.leaky_slope # Set the slope to leaky_slope where z <= 0 using masking
+        
         return derivative
     
     

@@ -46,7 +46,7 @@ class ControlErrorIntegrator:
 
         # 1. Look at the current error and add it to your memory
         # The leak term keeps the integral from growing indefinitely, which is important for stability.
-        delta_integral = (self.dt / self.tau) * (error - self.alpha * current_controls)
+        delta_integral = (self.dt / self.tau) * (error - self.alpha * current_controls_integral)
 
         # 2. Update the integral memory with the new error contribution
         next_controls_integral = current_controls_integral + delta_integral
