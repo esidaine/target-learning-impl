@@ -1,7 +1,9 @@
-# Target Learning Implementation
-
+<div align="center">
+  <h1>A Dynamical Model of Target Learning with PID Control</h1>
+ 
 [![Status](https://img.shields.io/badge/Status-Ongoing_Research-blue.svg)]()
 [![Weights & Biases](https://img.shields.io/badge/Weights_&_Biases-Supported-yellow.svg)]()
+</div>
 
 ## 📌 Overview
 
