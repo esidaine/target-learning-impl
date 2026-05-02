@@ -1,6 +1,6 @@
 import torch
-from models.network import Network
 from core.controllers import ControlMechanism
+from _helpers import _diagnose_layerwise_mismatches
 
 def test_get_local_controls_matches_autograd(tiny_network, tiny_batch):
     # Set up tiny detwork and batch
@@ -37,28 +37,10 @@ def test_get_local_controls_matches_autograd(tiny_network, tiny_batch):
     autograd_controls = [pop.z.grad.clone() for pop in tiny_network.populations]
 
     # Compare the two sets of controls
-    _diagnose_mismatches(pid_controls, autograd_controls)
+    _diagnose_layerwise_mismatches(
+        pairs=zip(pid_controls, autograd_controls),
+        tol=1e-5,
+        label="pid vs autograd controls",
+    )
 
 
-def _diagnose_mismatches(manual, autograd, rtol=1e-5, atol=1e-6):
-    """ Summary across all layers."""
-    rows = []
-    # Check each layer's controls for closeness, and if not, gather stats on the mismatch
-    for i, (m, a) in enumerate(zip(manual, autograd)):
-        if torch.allclose(m, a, rtol=rtol, atol=atol):
-            continue
-
-        # Get mismatch
-        diff = (m - a).abs()
-
-        # Calculate the max and mean difference to understand the scale of the mismatch
-        max_d, mean_d = diff.max().item(), diff.mean().item()
-
-        # Identify whetehr diff values cluster tightly around the mean
-        kind = "systematic" if max_d < 3 * mean_d else "outlier"
-        rows.append(f"  L{i}: mean={mean_d:.2e}  max={max_d:.2e}  ({kind})")
-
-    if rows:
-        raise AssertionError(
-            f"\n{len(rows)}/{len(manual)} layers mismatch:\n" + "\n".join(rows)
-        )

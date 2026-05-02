@@ -38,6 +38,7 @@ artifacts/
 pip-log.txt
 pip-delete-this-directory.txt
 training.log
+weights/
 
 # ==========================================
 # 4. DISTRIBUTION / PACKAGING
@@ -73,6 +74,8 @@ ipython_config.py
 .spyderproject
 .spyproject
 .ropeproject
+notebooks/weights/
+notebooks/meeting_22_04.ipynb
 
 # ==========================================
 # 6. TESTING, TYPING & LINTING

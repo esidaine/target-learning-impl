@@ -58,7 +58,6 @@ class Network(nn.Module):
                    layer_target_controls = backward_signal * layer_sensitivity
 
                 else:
-                    # ! WILL BE CHANGED TO ALIGN WITH DFC 
                     back_weights = self.populations[i+1].W.weight # This is already the transpose
                     # We take the message from the layer above and push it backward through the feedback wiring
                     # We multiply the signal by the neuron's sensitivity
