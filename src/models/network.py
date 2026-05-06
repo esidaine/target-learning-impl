@@ -204,6 +204,7 @@ class NeuralPopulation(nn.Module):
             # Step the physics forward 
             next_activation, settled = self.dynamics.step(self.a_controlled, target_activation)
             self.firing_settled = bool(settled.item())  # diagnostic only
+
             return next_activation
         
     def repolarize(self):

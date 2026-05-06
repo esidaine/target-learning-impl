@@ -1,12 +1,13 @@
 import torch
 from core.controllers import ControlMechanism
 from _helpers import _diagnose_layerwise_mismatches
+from torch.nn import functional as F
 
 def test_get_local_controls_matches_autograd(tiny_network, tiny_batch):
     """
     Tests that the pid controls computed by get_local_controls match the autograd-computed controls, for a single forward pass with zero controls.
     """
-    # Set up tiny detwork and batch
+    # Set up tiny network and batch
     torch.manual_seed(0)
     x, _ = tiny_batch
     x = x.detach().requires_grad_(True)   # put x into the autograd graph so that we can backprop through it
@@ -40,6 +41,9 @@ def test_get_local_controls_matches_autograd(tiny_network, tiny_batch):
     autograd_controls = [pop.z.grad.clone() for pop in tiny_network.populations]
 
     # Compare the two sets of controls
+    cos_sim = F.cosine_similarity(pid_controls[0].flatten(), autograd_controls[0].flatten(), dim=0)
+    assert cos_sim > 0.99, "Cos similarity: PID direction diverges from Autograd gradient."
+
     _diagnose_layerwise_mismatches(
         pairs=zip(pid_controls, autograd_controls),
         tol=1e-5,

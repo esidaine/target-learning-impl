@@ -55,12 +55,16 @@ def test_firing_rate_dynamics_converge(tiny_network, tiny_batch):
             f"{(pop.a_controlled - pop.target_activations).abs().max().item():.6f}"
         )
 
-
     # No further movement at the fixed point.
     if previous_activation is not None and next_activations is not None:
         assert torch.allclose(next_activations, previous_activation, atol=1e-3), (
             "Output is still moving at the reported convergence step"
         )
+
+    # Check wether it actually moved 
+    for pop in tiny_network.populations:
+        assert not torch.allclose(pop.a_controlled, pop.a_baseline, atol=1e-3), \
+            "Firing rate dynamics never actually moved from baseline."
 
 
     
