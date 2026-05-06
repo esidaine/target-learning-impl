@@ -39,7 +39,7 @@ class ControlErrorIntegrator:
         self.alpha = alpha
         self.k_p = k_p # Proportional gain 
 
-    def step(self, current_controls, current_controls_integral, error):
+    def step(self, current_controls_integral, error):
         # The leak term alpha * current_integral causes the control signal to drop, 
         # which causes the error to increase. The leak is the teacher actively trying to walk away. 
         # It penalizes the control signal, forcing it to be as close to zero as possible. 

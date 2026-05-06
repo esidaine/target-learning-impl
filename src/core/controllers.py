@@ -2,7 +2,6 @@ import os
 import sys
 import torch
 import torch.nn as nn
-# sys.path.append(os.path.abspath('..'))
 from utils.utils import get_logger
 from core.euler_integrators import ControlErrorIntegrator
 from dataclasses import dataclass
@@ -169,7 +168,6 @@ class ControlMechanism:
         batch_size = sensory_inputs.size(0)
         output_size = target_y.size(1)
 
-        global_control = torch.zeros(batch_size, output_size, device=sensory_inputs.device) # This is the global control signal that we will update iteratively
         global_control_integral = torch.zeros(batch_size, output_size, device=sensory_inputs.device)
         local_controls = control_signals # All zeros at the start
 
@@ -199,6 +197,7 @@ class ControlMechanism:
             metrics.final_loss = mse_loss
             
             if mse_loss < self.tolerance:
+                # If the error is already small enough, we can stop optimizing and return the current control signals.
                 logger.debug(f"PID Converged at step {step} with loss {mse_loss}")
 
                 # If we break before taking any physical steps, we must run one dummy pass so the network initializes 
@@ -210,7 +209,7 @@ class ControlMechanism:
             # ==========================================
             # 3. UPDATE GLOBAL CONTROL SIGNAL, STEP IN TIME
             # ==========================================
-            global_control_integral, global_control = control_stepper.step(global_control, global_control_integral, output_error) 
+            global_control_integral, global_control = control_stepper.step(global_control_integral, output_error) 
 
             # ==========================================
             # 4. CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD 

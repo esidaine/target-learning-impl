@@ -3,6 +3,9 @@ from core.controllers import ControlMechanism
 from _helpers import _diagnose_layerwise_mismatches
 
 def test_get_local_controls_matches_autograd(tiny_network, tiny_batch):
+    """
+    Tests that the pid controls computed by get_local_controls match the autograd-computed controls, for a single forward pass with zero controls.
+    """
     # Set up tiny detwork and batch
     torch.manual_seed(0)
     x, _ = tiny_batch

@@ -22,6 +22,10 @@ def tiny_network():
     """A 2-4-1 network, freshly initialized, on CPU."""
     return Network(pop_sizes=[2, 4, 1])
 
+def tiny_additive_network():
+    """A 2-4-1 network, with linear dendritic modulation, freshly initialized, on CPU."""
+    return Network(pop_sizes=[2, 4, 1], dendritic_effect="additive")
+
 @pytest.fixture
 def mnist_network():
     """A small MNIST-shaped network: 784 -> 32 -> 10.

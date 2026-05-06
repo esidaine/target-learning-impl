@@ -12,12 +12,16 @@ logger = get_logger()
 
 
 class Network(nn.Module):
-    def __init__(self, pop_sizes):
+    def __init__(self, pop_sizes, dendritic_effect="multiplicative"):
         super().__init__()
         
         # Note that pop[0] referrs to the first hidden layer, not the input layer
         self.populations: nn.ModuleList = nn.ModuleList([
-            NeuralPopulation(pop_sizes[i], pop_sizes[i+1])
+            NeuralPopulation(
+                num_inputs = pop_sizes[i], 
+                num_neurons = pop_sizes[i+1], 
+                dendritic_effect=dendritic_effect
+            )
             for i in range(len(pop_sizes) - 1)
         ])
 
@@ -114,13 +118,14 @@ class Network(nn.Module):
     
 
 class NeuralPopulation(nn.Module):
-    def __init__(self, num_inputs, num_neurons, leaky_slope=0.01):
+    def __init__(self, num_inputs, num_neurons, leaky_slope=0.01, dendritic_effect="multiplicative"):
         """
         Represents a group of Multi-Compartment neurons with specific anatomy and processing rules of top-down and bottom-up input.
         """
         super().__init__()
         self.num_neurons = num_neurons
         self.leaky_slope = leaky_slope
+        self.dendritic_effect = dendritic_effect
         
         # 1. HOLDING WEIGHTS, disable biases and gradient tracking
         self.W = nn.Linear(num_inputs, num_neurons, bias=False)
@@ -131,6 +136,8 @@ class NeuralPopulation(nn.Module):
         # 2. INITIALIZING STATE MEMORY 
         self.a_baseline: Optional[torch.Tensor] = None # Activation for the first guess
         self.a_controlled: Optional[torch.Tensor] = None # The dynamic physical state that changes over time given the control signal (top-down input)
+        self.firing_settled: Optional[bool] = None # Diagnostic variable to track whether the dynamics have settled at the target yet. 
+        self.target_activation: Optional[torch.Tensor] = None 
 
         # 3. Internal dynamics for the firing rate to evolve over time
         self.dynamics = FiringRateDynamics(dt=0.1, tau=1.0)
@@ -161,14 +168,25 @@ class NeuralPopulation(nn.Module):
         - If dynamic_step=True: Leaky-integrates the current state towards the target rate (for PID).
 
         """
+        
         # 1. Get the bottom-up activation
         phi_z = self.bottom_up_proc(sensory_inputs)
+    
         
-        # 2. Get the top-down apical activation
-        q_c = self.dendritic_proc(c_n)
+        # 3. Combine them with multiplicative or additive effect (element-wise multiplication)
+        if self.dendritic_effect == "multiplicative":
+            # 2. Get the top-down apical activation
+            # When c_n is very negative, q_c approaches 0 (silences the neuron).
+            # When c_n is very positive, q_c approaches 2 (doubles the bottom-up rate).
+            q_c = self.dendritic_proc(c_n)
+            target_activation = (beta * q_c) * phi_z 
+        elif self.dendritic_effect == "additive":
+            # Combine additively: adds or subtracts at most 1.0 from the firing rate (capped by the tanh nonlinearity)
+            target_activation = phi_z + torch.tanh(c_n)
+        else:
+            raise ValueError(f"Invalid dendritic_effect: {self.dendritic_effect}. Must be 'multiplicative' or 'additive'.")
         
-        # 3. Combine them with multiplicative effect (element-wise multiplication)
-        target_activation = (beta * q_c) * phi_z 
+        self.target_activation = target_activation
         
         # 4. Instantaneous vs. Dynamical Return
         if not dynamic_step:
@@ -184,7 +202,8 @@ class NeuralPopulation(nn.Module):
                     self.a_controlled = self.a_baseline.clone()
         
             # Step the physics forward 
-            next_activation, _ = self.dynamics.step(self.a_controlled, target_activation)
+            next_activation, settled = self.dynamics.step(self.a_controlled, target_activation)
+            self.firing_settled = bool(settled.item())  # diagnostic only
             return next_activation
         
     def repolarize(self):
