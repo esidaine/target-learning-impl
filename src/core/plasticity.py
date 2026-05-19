@@ -1,7 +1,4 @@
 import torch
-import os
-import sys
-# sys.path.append(os.path.abspath('..'))
 from utils.utils import get_logger
 
 logger = get_logger()
@@ -13,8 +10,8 @@ class Plasticity:
     num_neurons is the number of neurons in one specific layer (or "population")
     """
 
-    def __init__(self, lr_theta=0.1):
-        self.lr_theta = lr_theta # Learning rate for the network weights
+    def __init__(self, lr_w: float):
+        self.lr_w = lr_w # Learning rate for the network weights
 
     def learning_rule(self, a_pre, a_baseline, a_controlled):  
         # 1. Calculate the difference between the target activation and baseline activation
@@ -58,4 +55,4 @@ class Plasticity:
             delta_W = self.learning_rule(a_pre, a_base, a_ctrl)
             
             # 4. Apply the update to the population's weights
-            pop.W.weight.data += self.lr_theta * delta_W
+            pop.W.weight.add_(delta_W, alpha=self.lr_w)

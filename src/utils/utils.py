@@ -7,6 +7,7 @@ import inspect
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 import wandb
 from core.euler_integrators import ControlErrorIntegrator
 
@@ -30,11 +31,16 @@ def save_experiment(network, controller, plasticity, epoch, loss, task):
     Saves the model weights and experiment metadata.
     """
     # 1. Create a dedicated directory if it doesn't exist
-    save_dir = "weights"
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = Path("weights")
+    save_dir.mkdir(parents=True, exist_ok=True) 
+    
 
-    json_filename = f"{task}_{controller.mode}_best_model_meta.json"
-    json_path = os.path.join(save_dir, json_filename)
+    # Forcefully remove hidden spaces, newlines, and carriage returns
+    clean_task = str(task).strip().replace("\n", "").replace("\r", "")
+    clean_mode = str(controller.mode).strip().replace("\n", "").replace("\r", "")
+
+    json_filename = f"{clean_task}_{clean_mode}_best_model_meta.json"
+    json_path = save_dir / json_filename
     
     # 3. Harvest the Hyperparameters (The "Context")
     hyperparameters = {
@@ -157,62 +163,3 @@ def test_function(func, test_cases, tolerance=1e-5):
     print(f"--- Results: {passed} Passed | {failed} Failed ---\n")
     return failed == 0
 
-def debug_dynamical_settling(network, controller, sensory_inputs, target_y):
-    """
-    Run this function on a single batch (or single data point) to visualize 
-    if your dt, tau, and k_p are mathematically stable.
-    """
-    network.eval()
-    
-    # Tracking lists
-    errors = []
-    control_magnitudes = []
-    neuron_activations = []
-
-    with torch.no_grad():
-        baseline_pred = network(sensory_inputs, control_signals=None, save_baseline=True)
-
-    # Initialize Controller variables
-    batch_size = sensory_inputs.size(0)
-    output_size = target_y.size(1)
-    global_control = torch.zeros(batch_size, output_size)
-    global_control_integral = torch.zeros(batch_size, output_size)
-    control_stepper = ControlErrorIntegrator(dt=0.1, tau=1.0, alpha=0.1, k_p=0.05)
-    
-    y_pred = baseline_pred
-
-    for step in range(100): # Force a longer run to see the full curve
-        output_error = target_y - y_pred 
-        mse_loss = torch.mean(output_error ** 2).item()
-        
-        # Step the controller
-        global_control_integral, global_control = control_stepper.step(
-            global_control, global_control_integral, output_error) 
-        
-        # Step the network
-        local_controls = network.get_local_controls(global_control)
-        y_pred = network(sensory_inputs, control_signals=local_controls, save_baseline=False, dynamic_step=True)
-
-        # --- LOGGING ---
-        errors.append(mse_loss)
-        control_magnitudes.append(torch.mean(torch.abs(global_control)).item())
-        
-        # Track a specific neuron in the first hidden layer to see its physical movement
-        tracked_neuron_state = network.populations[0].a_controlled[0, 0].item() # [0, 0] grabs the first neuron in the first population
-        neuron_activations.append(tracked_neuron_state)
-
-    # --- PLOTTING ---
-    fig, axs = plt.subplots(3, 1, figsize=(10, 8))
-    
-    axs[0].plot(errors, color='red')
-    axs[0].set_title('Global MSE Error (Should smoothly drop to near 0)')
-    
-    axs[1].plot(control_magnitudes, color='blue')
-    axs[1].set_title('Global Control Signal Magnitude (Should increase and not explode)')
-    
-    axs[2].plot(neuron_activations, color='green')
-    axs[2].set_title('Single Neuron Physical State (a_controlled)')
-    axs[2].set_xlabel('Integration Steps')
-    
-    plt.tight_layout()
-    plt.show()

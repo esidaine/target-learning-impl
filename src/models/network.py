@@ -1,9 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
-import sys
-#sys.path.append(os.path.abspath('..'))
 from utils.utils import get_logger
 from typing import Optional
 from core.euler_integrators import FiringRateDynamics
@@ -12,69 +9,52 @@ logger = get_logger()
 
 
 class Network(nn.Module):
-    def __init__(self, pop_sizes, dendritic_effect="multiplicative"):
+    def __init__(self, pop_sizes, dendritic_effect="additive"):
         super().__init__()
         
-        # Note that pop[0] referrs to the first hidden layer, not the input layer
+        # Note that pop[0] refers to the first hidden layer, not the input layer
         self.populations: nn.ModuleList = nn.ModuleList([
             NeuralPopulation(
                 num_inputs = pop_sizes[i], 
                 num_neurons = pop_sizes[i+1], 
+                output_dim = pop_sizes[-1],
                 dendritic_effect=dendritic_effect
             )
             for i in range(len(pop_sizes) - 1)
         ])
 
-    def get_local_controls(self, global_control):
+        #### 
+        # DEFINE Q WEIGTHT MATRIX AS TRANSPOSE OF FORWARD WEIGHTS
+        ####
+
+    def project_feedback(self, global_control: torch.Tensor) -> list[torch.Tensor]:
             """
-            Route the global control signal backward through the network using the Chain Rule. Note that the weights are frozen. 
+            DFC credit-assignement
+            DFC uses parallel broadcasting, where the global controller signal $u$ is sent directly to all hidden
+            layers simultaneously via a feedback matrix
+            -------
+            list[Tensor]
+                `[c_1, c_2, ..., c_L]`, where `c_i = Q_i @ u`, one per layer/population.
+                Where u is the global control signal produced by the PID controller. It has one number per neuron
 
-            Finds the target state (Psi_i) for the neurons in a given hidden layer 'i'
+            u                 has shape (batch, output_dim)
+            Q_i               has shape (num_neurons_in_layer_i, output_dim)
+            c_i = Q_i @ u     has shape (batch, num_neurons_in_layer_i)
 
-            The universal equation executed across the layers is:
-                Psi_i = (Psi_{i+1} @ W_{i+1}^T) * f'(z_i)
-
-            Where:
-            - '@' represents matrix multiplication (dot product).
-            - 'W^T' is the transpose of the forward weight matrix.
-            - '*' represents element-wise multiplication.
             """
-            # Counts the number of hidden layers to know how deep the network is
             L = len(self.populations) 
-
-            # Creating a fixed array of slots for storing the target controls, slot with idx 0 corresponds to the first hidden layer etc. 
-            control_targets = [None] * L
-
-            # Pre-compute f'(z), the activation derivatives for all neurons per layers/populations
-            neuron_sensitivities = []
-            for pop in self.populations:
-                assert isinstance(pop, NeuralPopulation) # Type guard
-                neuron_sensitivities.append(pop.get_bottom_up_activation_derivatives())
-
-            backward_signal = global_control # This is the initial signal that we want to propagate backward
-
-            # Traverse backwards from the output layer to the first hidden layer
-            for i in reversed(range(L)):
-                # Get the sensitivities f' for the current layer/ population
-                layer_sensitivity = neuron_sensitivities[i]
-
-                if i == L - 1:
-                   layer_target_controls = backward_signal * layer_sensitivity
-
-                else:
-                    back_weights = self.populations[i+1].W.weight # This is already the transpose
-                    # We take the message from the layer above and push it backward through the feedback wiring
-                    # We multiply the signal by the neuron's sensitivity
-                    layer_target_controls = torch.matmul(backward_signal, back_weights) * layer_sensitivity
+        
+            # Pre-allocate a list of size L to avoid the IndexError
+            local_controls = [torch.empty(0)] * L 
+            
+            for i, pop in enumerate(self.populations):
+                # Pylance checks
+                assert isinstance(pop, NeuralPopulation)
+                assert isinstance(pop.Q, nn.Linear)
                 
-                # Store the target control for this layer	
-                control_targets[i] = layer_target_controls
-
-                # Update the backward signal for the next iteration (the next layer down)
-                backward_signal = layer_target_controls 
-       
-            return control_targets	
-
+                local_controls[i] = F.linear(global_control, pop.Q.weight)
+    
+            return local_controls
 
 
     def forward(self, sensory_inputs, control_signals=None, save_baseline=False, dynamic_step=False):
@@ -118,28 +98,39 @@ class Network(nn.Module):
     
 
 class NeuralPopulation(nn.Module):
-    def __init__(self, num_inputs, num_neurons, leaky_slope=0.01, dendritic_effect="multiplicative"):
+    def __init__(self, num_inputs: int, num_neurons: int, output_dim: int, dendritic_effect: str, leaky_slope: float = 0.01):
         """
         Represents a group of Multi-Compartment neurons with specific anatomy and processing rules of top-down and bottom-up input.
+
+        - W : forward weights, shape (num_neurons, num_inputs).
+          Used in the forward pass.  Frozen during control optimisation;
+          updated separately by the plasticity rule.
+
+        - Q : DFC feedback weights, shape (num_neurons, output_dim).
+          Maps the *global* controller signal u into a *local* control
+          signal c_i for this layer.  Independent of W. Fixed throughout
+          training (DFC-fixed).  Flip `requires_grad` to learn it (DFC-SS).
+
         """
         super().__init__()
         self.num_neurons = num_neurons
+        self.output_dim = output_dim
         self.leaky_slope = leaky_slope
         self.dendritic_effect = dendritic_effect
         
-        # 1. HOLDING WEIGHTS, disable biases and gradient tracking
-        self.W = nn.Linear(num_inputs, num_neurons, bias=False)
+        # Forward weights, disable biases and gradient tracking
+        self.W = nn.Linear(num_inputs, num_neurons, bias=True)
         self.W.weight.requires_grad = False
-
-        self.z: Optional[torch.Tensor] = None # Bottom Up 
+        self.W.bias.requires_grad = False
         
-        # 2. INITIALIZING STATE MEMORY 
+        # State memory
         self.a_baseline: Optional[torch.Tensor] = None # Activation for the first guess
+        self.z: Optional[torch.Tensor] = None # Bottom Up 
         self.a_controlled: Optional[torch.Tensor] = None # The dynamic physical state that changes over time given the control signal (top-down input)
         self.firing_settled: Optional[bool] = None # Diagnostic variable to track whether the dynamics have settled at the target yet. 
         self.target_activation: Optional[torch.Tensor] = None 
 
-        # 3. Internal dynamics for the firing rate to evolve over time
+        # Internal dynamics for the firing rate to evolve over time
         self.dynamics = FiringRateDynamics(dt=0.1, tau=1.0)
     
     def dendritic_proc(self, signal):
@@ -157,7 +148,7 @@ class NeuralPopulation(nn.Module):
         # Store z for later use
         self.z = z  
         # Apply leaky relu function
-        return F.leaky_relu(z, negative_slope= self.leaky_slope)
+        return F.leaky_relu(z, negative_slope=self.leaky_slope)
 
     def firing_rate(self, sensory_inputs, c_n, dynamic_step=False, beta=1.0):
         """
@@ -190,14 +181,19 @@ class NeuralPopulation(nn.Module):
         
         # 4. Instantaneous vs. Dynamical Return
         if not dynamic_step:
-            # Return the target activation directly, instantaneously
-            return target_activation
+            # Return the target activation directly
+            return target_activation # Model A: instantaneous
  
         else:
             # The dynamics integrator continually grabs the current physical state (self.a_controlled) 
             # and nudges it step-by-step toward the target firing rate (target_r). 
             # If this is the first dynamic step, initialize a_controlled as baseline
             if self.a_controlled is None:
+                    if self.a_baseline is None:
+                        raise RuntimeError(
+                            "Dynamic step requested before a baseline pass. "
+                            "Call network.forward(..., save_baseline=True) first."
+                        )
                     # Start physical settling from the baseline prediction
                     self.a_controlled = self.a_baseline.clone()
         
@@ -205,7 +201,7 @@ class NeuralPopulation(nn.Module):
             next_activation, settled = self.dynamics.step(self.a_controlled, target_activation)
             self.firing_settled = bool(settled.item())  # diagnostic only
 
-            return next_activation
+            return next_activation # Model B: leaky-integrated
         
     def repolarize(self):
         """
@@ -214,6 +210,7 @@ class NeuralPopulation(nn.Module):
         """
         self.a_controlled = None  # type: ignore
     
+    # THIS IS TO BE DELETED, MAY BE USED FOR TESTS
     def get_bottom_up_activation_derivatives(self): 
         """
         This function calculates the derivative of the bottom-up (Leaky ReLU) activation function.

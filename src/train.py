@@ -1,6 +1,15 @@
 import torch
 import os 
 import sys
+import pickle
+from pathlib import Path
+from dataclasses import asdict
+
+root = Path.cwd().parent           # target-learning-impl folder
+for p in (root, root / 'src'):
+    p = str(p)
+    if p not in sys.path:
+        sys.path.append(p)
 
 # ==========================================
 # TURN ON ANOMALY DETECTION FOR DEBUGGING
@@ -12,30 +21,52 @@ import sys
 from models.network import Network
 from core.controllers import ControlMechanism
 from core.plasticity import Plasticity
-from xor.dataset import get_dataloader
+from data.xor.dataset import get_dataloader
 from core.trainer import Trainer
-from utils.utils import set_all_seeds, save_experiment, get_weight_metrics
+from utils.utils import set_all_seeds, save_experiment, get_weight_metrics, get_logger
+from utils.config import ExperimentConfig, BackpropControlParams, PIDControlParams, BackpropPlasticityParams, PIDPlasticityParams
 from IPython.display import clear_output
-from utils.utils import get_logger
-
-logger = get_logger()
-
 from tqdm import tqdm
 import wandb
 
+
+logger = get_logger()
+
+
 def main():
-    set_all_seeds(7)
-    task = "xor"  # Define the task (for documentation and saving purposes)
-    epochs = 320
+    config = ExperimentConfig(
+        task="xor",
+        mode="backprop",                  # Choose 'backprop' or 'pid'
+        dendritic_effect="additive", # Choose 'additive' or 'multiplicative'
+        epochs=1500,
+        seed=7,
+        pop_sizes=[2, 4, 1], 
+        controller=BackpropControlParams(lr_c=0.5, momentum=0.5),
+        plasticity=BackpropPlasticityParams(lr_w=0.5)
+    )
 
-    wandb_on = True  # Set to True to enable W&B logging
+    set_all_seeds(config.seed)
+    manim = False
+    wandb_on = False  
+    should_save = False
 
-    # 1. Initialize Anatomy (e.g., 2 inputs -> 4 hidden -> 1 output)
-    network = Network(pop_sizes=[2, 4, 1])
+    print(f"🚀 {config.task.upper()} with {config.mode.upper()} ({config.dendritic_effect})")
 
-    # 2. Initialize Mechanics
-    controller = ControlMechanism(mode='pid', lr_c=0.1, max_steps=60)
-    plasticity = Plasticity(lr_theta=0.2)
+    # Initialize Anatomy using config values
+    network = Network(
+        pop_sizes=config.pop_sizes,
+        dendritic_effect=config.dendritic_effect
+    )
+
+    # Initialize Mechanics
+    controller_kwargs = {
+        "mode": config.mode,
+        "max_steps": config.max_steps,
+        **asdict(config.controller) # Unpacks to lr_c=0.1 OR k_p=0.8, dt=0.1, etc.
+    }
+    
+    controller = ControlMechanism(**controller_kwargs)
+    plasticity = Plasticity(lr_w=config.plasticity.lr_w)
 
     # 3. Initialize variables, pbar and objects for training
     trainer = Trainer(network, controller, plasticity)
@@ -45,10 +76,14 @@ def main():
     current_avg_loss = float('inf')
 
     if wandb_on:
-        wandb.init(project="target-learning", name=f"{task}_{controller.mode}_training_run")
+        wandb.init(
+            project="target-learning", 
+            name=f"{config.task}_{config.mode}_{config.dendritic_effect}_run",
+            config=asdict(config) 
+        )
     
     # Initialize tqdm progress bar
-    progress_bar = tqdm(range(epochs), desc="Learning")
+    progress_bar = tqdm(range(config.epochs), desc="Learning")
 
     # 4. Train
     for epoch in progress_bar:
@@ -57,14 +92,16 @@ def main():
         # Checkpoint: Save if this is the best model so far
         if current_avg_loss < best_loss:
             best_loss = current_avg_loss
-            save_experiment(
-                network=network, 
-                controller=controller, 
-                plasticity=plasticity, 
-                epoch=epoch, 
-                loss=current_avg_loss, 
-                task=task
-            )
+
+            if should_save: 
+                save_experiment(
+                    network=network, 
+                    controller=controller, 
+                    plasticity=plasticity, 
+                    epoch=epoch, 
+                    loss=current_avg_loss, 
+                    task=config.task
+                )
 
         progress_bar.set_postfix({
             "Loss": f"{current_avg_loss:.4f}", 
@@ -86,6 +123,26 @@ def main():
     # Cleanly close the W&B run
     if wandb.run is not None:
         wandb.finish()
+
+    if config.mode == "pid" and manim:
+
+        # Grab ONE sample batch from your dataset
+        test_inputs, test_targets = next(iter(dataloader))
+
+        # Force a single control optimization pass just to harvest the data
+        print("Generating Manim visualization data...")
+        _, metrics = controller.optimize_control_signal(
+            sensory_inputs=test_inputs,
+            target_y=test_targets,
+            network=network
+        )
+
+        # Save it
+        history_filename = "network_history.pkl"
+        with open(history_filename, "wb") as f:
+            pickle.dump(metrics.state_history, f)
+
+        print(f"Successfully exported {len(metrics.state_history)} steps to {history_filename}!")
 
 if __name__ == "__main__":
     main()

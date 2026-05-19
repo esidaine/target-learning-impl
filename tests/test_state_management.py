@@ -37,8 +37,8 @@ def test_no_computational_graph_leakage(tiny_network, tiny_batch):
     Ensures that the custom Target Learning manual weight updates do not accidentally 
     accumulate PyTorch Autograd gradients, which would cause memory leaks over epochs.
     """
-    controller = ControlMechanism(mode='backprop', lr_c=0.1, max_steps=5)
-    plasticity = Plasticity(lr_theta=0.2)
+    controller = ControlMechanism(mode='backprop', max_steps=5)
+    plasticity = Plasticity(lr_w=0.5)
     trainer = Trainer(tiny_network, controller, plasticity)
     
     x, _ = tiny_batch

@@ -1,13 +1,16 @@
 import torch
 from typing import Optional
+import pytest
 
-def test_firing_rate_dynamics_converge(tiny_network, tiny_batch): 
+@pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
+def test_firing_rate_dynamics_converge(tiny_network, tiny_batch, dendritic_effect): 
     """
     This test checks class FiringRateDynamics. 
     a_controlled chases target_activation over time. Convergence means a_controlled has reached its fixed point
     for the currently held control signals. The fixed point is just a_controlled = target_activation
     """
     x,_ = tiny_batch
+    tiny_network.dendritic_effect = dendritic_effect
 
     # 1. Free pass: seeds a_baseline in every population so a_controlled
     #    has something to initialize from on the first dynamic step.
