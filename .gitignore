@@ -74,8 +74,7 @@ ipython_config.py
 .spyderproject
 .spyproject
 .ropeproject
-notebooks/weights/
-notebooks/meeting_22_04.ipynb
+notebooks/
 
 # ==========================================
 # 6. TESTING, TYPING & LINTING
@@ -101,3 +100,10 @@ coverage.xml
 Thumbs.db
 .env
 .envrc
+
+# ==========================================
+# 8. VISUALIZATION 
+# ==========================================
+network_history.pkl
+media/
+src/visualizations/
