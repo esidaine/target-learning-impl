@@ -26,7 +26,11 @@ class Plasticity:
 
         # 3. Divide by batch size to get the average weight update
         batch_size = a_pre.size(0)
-        return delta_W / batch_size
+        delta_W = torch.matmul(errors.T, a_pre) / batch_size
+
+        # 4. Calculate bias updates as the average error across the batch
+        delta_b = errors.mean(dim=0)
+        return delta_W, delta_b
 
     @torch.no_grad() # Turn off gradients since we are doing manual weight updates
     def update_weights(self, network, sensory_inputs): 
@@ -52,7 +56,11 @@ class Plasticity:
             a_ctrl = pop.a_controlled
             
             # 3. Calculate the weight update matrix
-            delta_W = self.learning_rule(a_pre, a_base, a_ctrl)
+            delta_W, delta_b = self.learning_rule(a_pre, a_base, a_ctrl)
             
             # 4. Apply the update to the population's weights
             pop.W.weight.add_(delta_W, alpha=self.lr_w)
+
+            # Also update the bias term 
+            pop.W.bias.add_(delta_b,   alpha=self.lr_w)
+            

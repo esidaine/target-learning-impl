@@ -57,6 +57,6 @@ def test_learning_rule():
     # divide by batch size to get average update
     expected_delta_W = expected_delta_W / a_pre.size(0)
 
-    computed_delta_W = plasticity.learning_rule(a_pre, a_baseline, a_controlled)
+    computed_delta_W, _ = plasticity.learning_rule(a_pre, a_baseline, a_controlled)
     assert torch.allclose(computed_delta_W, expected_delta_W)
     

@@ -23,9 +23,51 @@ class Network(nn.Module):
             for i in range(len(pop_sizes) - 1)
         ])
 
-        #### 
-        # DEFINE Q WEIGTHT MATRIX AS TRANSPOSE OF FORWARD WEIGHTS
         ####
+        # FEEDBACK WEIGHT INITIALIZATION: Q_i = J_i^T at init
+        #
+        # For a 1-hidden-layer net this reduces to Q_hidden = W_output^T,
+        # which is the "Q = W^T" prescription. The chained-product form below
+        # generalizes to arbitrary depth without changing the call site.
+        #
+        # Q_i has shape (num_neurons_i, output_dim) and maps the global
+        # controller signal u into a local control signal c_i for layer i.
+        # DFC-fixed mode: Q is frozen throughout training.
+        # For one hidden layer Q = J^T is indeed the same as Q = W^T 
+        ####
+        with torch.no_grad():
+            L = len(self.populations)
+            for i, pop in enumerate(self.populations):
+                assert isinstance(pop, NeuralPopulation)
+
+                # Instantiate the feedback projection: u (output_dim) -> c_i (num_neurons)
+                pop.Q = nn.Linear(pop.output_dim, pop.num_neurons, bias=False)
+
+                if i == L - 1:
+                    # Output layer: Q = I.
+                    nn.init.eye_(pop.Q.weight)
+                else:
+                    # Hidden layer i: Q_i = (W_{L-1} @ W_{L-2} @ ... @ W_{i+1})^T
+                    # For 1 hidden layer (L=2, i=0) this is just W_1^T.
+                    next_pop = self.populations[i + 1]
+                    assert isinstance(next_pop, NeuralPopulation)
+                    assert isinstance(next_pop.W, nn.Linear)
+                    M: torch.Tensor = next_pop.W.weight
+
+                    for j in range(i + 2, L):
+                        pop_j = self.populations[j]
+                        assert isinstance(pop_j, NeuralPopulation)
+                        assert isinstance(pop_j.W, nn.Linear)
+                        M = pop_j.W.weight @ M
+                    # M has shape (output_dim, num_neurons_i); Q is its transpose.
+                    pop.Q.weight.copy_(M.t())
+
+                # Freeze: DFC-fixed mode. Flip to True (and add an SS rule)
+                # later if you want DFC-SS.
+                pop.Q.weight.requires_grad = False
+
+        
+
 
     def project_feedback(self, global_control: torch.Tensor) -> list[torch.Tensor]:
             """
@@ -120,8 +162,13 @@ class NeuralPopulation(nn.Module):
         
         # Forward weights, disable biases and gradient tracking
         self.W = nn.Linear(num_inputs, num_neurons, bias=True)
+        nn.init.uniform_(self.W.bias, -0.5, 0.5)
         self.W.weight.requires_grad = False
         self.W.bias.requires_grad = False
+        
+
+        # Feedback weights 
+        self.Q: Optional[nn.Linear] = None
         
         # State memory
         self.a_baseline: Optional[torch.Tensor] = None # Activation for the first guess
@@ -147,8 +194,7 @@ class NeuralPopulation(nn.Module):
         z = self.W(sensory_inputs)
         # Store z for later use
         self.z = z  
-        # Apply leaky relu function
-        return F.leaky_relu(z, negative_slope=self.leaky_slope)
+        return z
 
     def firing_rate(self, sensory_inputs, c_n, dynamic_step=False, beta=1.0):
         """
@@ -161,7 +207,7 @@ class NeuralPopulation(nn.Module):
         """
         
         # 1. Get the bottom-up activation
-        phi_z = self.bottom_up_proc(sensory_inputs)
+        z = self.bottom_up_proc(sensory_inputs)
     
         
         # 3. Combine them with multiplicative or additive effect (element-wise multiplication)
@@ -169,11 +215,17 @@ class NeuralPopulation(nn.Module):
             # 2. Get the top-down apical activation
             # When c_n is very negative, q_c approaches 0 (silences the neuron).
             # When c_n is very positive, q_c approaches 2 (doubles the bottom-up rate).
+            # phi_z = F.leaky_relu(z, negative_slope=self.leaky_slope)
+            phi_z = F.silu(z)
             q_c = self.dendritic_proc(c_n)
             target_activation = (beta * q_c) * phi_z 
         elif self.dendritic_effect == "additive":
             # Combine additively: adds or subtracts at most 1.0 from the firing rate (capped by the tanh nonlinearity)
-            target_activation = phi_z + torch.tanh(c_n)
+            z_controlled = z + torch.tanh(c_n)
+            # NOW pass it through the nonlinearity
+            # Note that the leaky ReLU is applied after the additive combination, so the control signal can push the neuron from subthreshold to suprathreshold or vice versa.
+            target_activation = F.silu(z_controlled) # Switched to SiLU for smoother gradients, but you can switch back to leaky ReLU if you prefer. 
+            #target_activation = F.leaky_relu(z_controlled, negative_slope=self.leaky_slope)
         else:
             raise ValueError(f"Invalid dendritic_effect: {self.dendritic_effect}. Must be 'multiplicative' or 'additive'.")
         

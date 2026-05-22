@@ -36,14 +36,15 @@ logger = get_logger()
 def main():
     config = ExperimentConfig(
         task="xor",
-        mode="backprop",                  # Choose 'backprop' or 'pid'
+        mode="pid",             # Choose 'backprop' or 'pid'
         dendritic_effect="additive", # Choose 'additive' or 'multiplicative'
-        epochs=1500,
+        epochs=1800,
         seed=7,
-        pop_sizes=[2, 4, 1], 
-        controller=BackpropControlParams(lr_c=0.5, momentum=0.5),
-        plasticity=BackpropPlasticityParams(lr_w=0.5)
+        pop_sizes=[2, 8, 1], 
+        controller=PIDControlParams(),
+        plasticity=PIDPlasticityParams()
     )
+
 
     set_all_seeds(config.seed)
     manim = False
@@ -118,7 +119,7 @@ def main():
         elif wandb_on: 
             logger.warning("W&B logging is enabled but no active run found. Metrics will not be logged to W&B.")
 
-    print(f"\n✅ Training Complete! Best model saved with loss {best_loss:.4f}")
+    print(f"\n✅ Training Complete! Best loss {best_loss:.4f}, Final loss {current_avg_loss:.4f}")
 
     # Cleanly close the W&B run
     if wandb.run is not None:
@@ -143,6 +144,22 @@ def main():
             pickle.dump(metrics.state_history, f)
 
         print(f"Successfully exported {len(metrics.state_history)} steps to {history_filename}!")
+
+    # Diagnostic evaluation of the final trained model on the XOR task
+    with torch.no_grad():
+        xor_inputs = torch.tensor([[0.,0.],[0.,1.],[1.,0.],[1.,1.]])
+        targets   = torch.tensor([0., 1., 1., 0.])
+        preds     = network(xor_inputs, control_signals=None, save_baseline=False).squeeze()
+        predicted = (preds >= 0.5).float()
+
+        print(f"{'input':>8} | {'target':>6} | {'raw':>8} | {'pred':>4} | {'ok':>3}")
+        print("-" * 42)
+        for x, t, p, pc in zip(xor_inputs, targets, preds, predicted):
+            ok = "✓" if pc == t else "✗"
+            print(f"{x.tolist()!s:>8} | {int(t):>6} | {p.item():>8.3f} | {int(pc):>4} | {ok:>3}")
+
+        acc = (predicted == targets).float().mean().item()
+        print(f"\naccuracy: {acc:.0%}")
 
 if __name__ == "__main__":
     main()

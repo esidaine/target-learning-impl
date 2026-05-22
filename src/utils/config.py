@@ -44,12 +44,12 @@ class ExperimentConfig:
         """Ensures the correct sub-configs match the selected mode."""
         if self.mode == "pid":
             if not isinstance(self.controller, PIDControlParams):
-                self.controller = PIDControlParams()
+                raise ValueError(f"Mismatch: mode is 'pid', but controller is {type(self.controller).__name__}")
             if not isinstance(self.plasticity, PIDPlasticityParams):
-                self.plasticity = PIDPlasticityParams()
+                raise ValueError(f"Mismatch: mode is 'pid', but plasticity is {type(self.plasticity).__name__}")
                 
         elif self.mode == "backprop":
             if not isinstance(self.controller, BackpropControlParams):
-                self.controller = BackpropControlParams()
+                raise ValueError(f"Mismatch: mode is 'backprop', but controller is {type(self.controller).__name__}")
             if not isinstance(self.plasticity, BackpropPlasticityParams):
-                self.plasticity = BackpropPlasticityParams()
+                raise ValueError(f"Mismatch: mode is 'backprop', but plasticity is {type(self.plasticity).__name__}")
