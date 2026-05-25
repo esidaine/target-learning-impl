@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Literal, Union
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 @dataclass
 class PIDControlParams:
@@ -7,11 +9,14 @@ class PIDControlParams:
     dt: float = 0.1
     tau: float = 1.0
     alpha: float = 0.01
+    max_steps: int = 100
+    use_derivative: bool = True
 
 @dataclass
 class BackpropControlParams:
     lr_c: float = 0.5
     momentum: float = 0.5
+    max_steps: int = 100
 
 @dataclass
 class PIDPlasticityParams:
@@ -29,7 +34,6 @@ class ExperimentConfig:
     mode: Literal["backprop", "pid"] = "pid"
     seed: int = 7
     epochs: int = 1500
-    max_steps: int = 50  # Shared by both optimization modes
     
     # 2. Network Anatomy
     pop_sizes: List[int] = field(default_factory=lambda: [2, 4, 1])

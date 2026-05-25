@@ -62,8 +62,7 @@ def main():
     # Initialize Mechanics
     controller_kwargs = {
         "mode": config.mode,
-        "max_steps": config.max_steps,
-        **asdict(config.controller) # Unpacks to lr_c=0.1 OR k_p=0.8, dt=0.1, etc.
+        **asdict(config.controller) # Unpacks to lr_c=0.1 OR k_p=0.8, dt=0.1, max_steps etc.
     }
     
     controller = ControlMechanism(**controller_kwargs)

@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import wandb
 from core.euler_integrators import ControlErrorIntegrator
+import torch.nn.functional as F
 
 def get_weight_metrics(network): 
     """
@@ -24,6 +25,16 @@ def get_weight_metrics(network):
         metrics[f"Weight_Histograms/Pop_{i}"] = wandb.Histogram(weights.numpy())
         
     return metrics
+
+def log_feedback_alignment(network, global_control: torch.Tensor) -> None:
+    dfc_controls = network.DFC_project_feedback(global_control, use_derivative=False)
+    bp_controls  = network.chain_rule_project_feedback(global_control)
+
+    for i, (c_dfc, c_bp) in enumerate(zip(dfc_controls, bp_controls)):
+        cos_sim = F.cosine_similarity(
+            c_dfc.flatten(1), c_bp.flatten(1), dim=1
+        ).mean().item()
+        network.stats[f'feedback_alignment_layer_{i}'] = cos_sim
 
 
 def save_experiment(network, controller, plasticity, epoch, loss, task):

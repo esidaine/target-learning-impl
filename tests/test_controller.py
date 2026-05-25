@@ -2,54 +2,158 @@ import torch
 from core.controllers import ControlMechanism
 from torch.nn import functional as F
 import pytest
+from _helpers import _prime_and_forward, _autograd_grads, _cosine_sims
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-def test_project_feedback_matches_autograd_direction(tiny_network, tiny_batch, dendritic_effect):
+def test_chain_rule_matches_autograd_exactly(tiny_network, tiny_batch, dendritic_effect):
     """
-    Tests that the pid controls computed by project_feedback match the autograd-computed controls, for a single forward pass with zero controls.
+    Mathematical claim: chain_rule_project_feedback is exact backpropagation.
+
+    For an instantaneous forward pass the recurrence
+        Ψ_L = u * f'(z_L)
+        Ψ_i = W_{i+1}^T Ψ_{i+1} * f'(z_i)
+    is algebraically identical to d/dz_i [(u * y).sum()].
+
+    Expected: cosine similarity > 0.999 on every layer (floating-point exact).
+    A lower value indicates a bug in either the SiLU derivative or the
+    chain-rule loop.
     """
-    tiny_network.dendritic_effect = dendritic_effect
-    torch.manual_seed(0)
+    torch.manual_seed(42)
     x, _ = tiny_batch
-    x = x.detach().requires_grad_(True)   # put x into the autograd graph so that we can backprop through it
-    controller = ControlMechanism(mode='backprop')
+    x = x.detach().requires_grad_(True)
 
-    initial_controls = controller.initialize_controls(
-        batch_size = x.size(0),
-        neuron_populations = tiny_network.populations
-    ) # already returns zeros with requires_grad=True
+    y = _prime_and_forward(tiny_network, x, dendritic_effect)
+    u = torch.randn_like(y)
 
-    # Prime a_baseline exactly the way optimize_control_signal does.
-    with torch.no_grad():
-        tiny_network.eval()
-        tiny_network.forward(x, control_signals=None, save_baseline=True)
-        tiny_network.train()
+    # Read pop.z BEFORE backward() releases the graph
+    chain_controls = tiny_network.chain_rule_project_feedback(u)
+    autograd_grads = _autograd_grads(tiny_network, y, u)
+
+    sims = _cosine_sims(chain_controls, autograd_grads)
+    worst = min(sims)
+
+    assert worst > 0.999, (
+        f"chain_rule_project_feedback diverges from autograd "
+        f"[dendritic_effect='{dendritic_effect}'].\n"
+        f"  Per-layer cos_sims : {[f'{s:.6f}' for s in sims]}\n"
+        f"  Worst layer        : {worst:.6f}\n"
+        f"  Check: SiLU derivative formula and W^T indexing in chain loop."
+    )
 
 
-    # ONE forward pass: zero controls with requires_grad=True.
-    # This populates pop.z AND puts it in the autograd graph.
-    y = tiny_network.forward(x, control_signals=initial_controls, save_baseline=False, dynamic_step=True)
+@pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
+def test_dfc_feedback_positively_aligned_with_gradient(tiny_network, tiny_batch, dendritic_effect):
+    """
+    Theoretical claim: DFC with Q initialised to J^T is gradient-aligned.
 
-    # Pick an arbitrary global control signal 
-    global_control = torch.randn_like(y)
+    Pure DFC (use_derivative=False): c_i = Q_i u = W_i^T u.
+    With Q_i = J_i^T at init, the feedback approximates the gradient
+    direction without the chain rule.  The claim is weak: cos_sim > 0
+    (positive alignment on every layer).  This is the minimum condition
+    for DFC to act as a useful learning signal.
 
-    # Pass global control through the network 
-    pid_controls = tiny_network.project_feedback(global_control)
+    A failure here points to a bug in the Q initialisation block of Network.
+    """
+    torch.manual_seed(42)
+    x, _ = tiny_batch
+    x = x.detach().requires_grad_(True)
 
-    # Get the autograd computed controls by backprop
     for pop in tiny_network.populations:
-        # Save the gradient on this intermediate tensor when backward runs
-        pop.z.retain_grad()
+        pop.dendritic_effect = dendritic_effect
 
-    # Compute derivatives, pretending that the gradient at the output is global_control
-    (global_control * y).sum().backward()
+    y = _prime_and_forward(tiny_network, x, dendritic_effect)
+    u = torch.randn_like(y)
 
-    # Read out the saved gradients at each layer's z.
-    autograd_controls = [pop.z.grad.clone() for pop in tiny_network.populations]
+    dfc_controls = tiny_network.DFC_project_feedback(u, use_derivative=False)
+    autograd_grads = _autograd_grads(tiny_network, y, u)
 
-    # Compare the two sets of controls
-    cos_sim = F.cosine_similarity(pid_controls[0].flatten(), autograd_controls[0].flatten(), dim=0)
-    assert cos_sim > 0.25, "Cos similarity: PID direction diverges from Autograd gradient."
+    sims = _cosine_sims(dfc_controls, autograd_grads)
+    worst = min(sims)
+
+    assert worst > 0.0, (
+        f"DFC feedback is anti-gradient at init "
+        f"[dendritic_effect='{dendritic_effect}']. "
+        f"Q may not be correctly initialised to J^T.\n"
+        f"  Per-layer cos_sims : {[f'{s:.4f}' for s in sims]}\n"
+        f"  Worst layer        : {worst:.4f}"
+    )
+
+
+@pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
+def test_dfc_derivative_flag_improves_gradient_alignment(tiny_network, tiny_batch, dendritic_effect):
+    """
+    Ablation hypothesis: use_derivative=True brings DFC closer to the true
+    gradient by recovering the local f'(z_i) factor that pure DFC omits.
+
+        Without: c_i =  Q_i u
+        With:    c_i = (Q_i u) * f'(z_i)
+
+    Tested across multiple random seeds to guard against a lucky single-seed
+    result.  Two conditions must hold:
+      1. Mean cosine similarity is higher with derivative than without,
+         averaged across all seeds.
+      2. The derivative flag improves alignment on a strict majority of seeds
+         (>= 4 out of 5), allowing for one adversarial seed where the SiLU
+         negative-derivative tail dominates.
+    """
+    seeds = [1, 2, 3, 7, 42]
+    records = []  # (seed, mean_no_deriv, mean_with_deriv, sims_no, sims_with)
+
+    for seed in seeds:
+        torch.manual_seed(seed)
+        x, _ = tiny_batch
+        x = x.detach().requires_grad_(True)
+
+        y = _prime_and_forward(tiny_network, x, dendritic_effect)
+        u = torch.randn_like(y)
+
+        # Both calls read pop.z; must happen before backward() releases the graph
+        dfc_no_deriv   = tiny_network.DFC_project_feedback(u, use_derivative=False)
+        dfc_with_deriv = tiny_network.DFC_project_feedback(u, use_derivative=True)
+        autograd_grads = _autograd_grads(tiny_network, y, u)
+
+        sims_no   = _cosine_sims(dfc_no_deriv,   autograd_grads)
+        sims_with = _cosine_sims(dfc_with_deriv, autograd_grads)
+
+        mean_no   = sum(sims_no)   / len(sims_no)
+        mean_with = sum(sims_with) / len(sims_with)
+
+        records.append((seed, mean_no, mean_with, sims_no, sims_with))
+
+    # ── Aggregate ──────────────────────────────────────────────────────────
+    overall_mean_no   = sum(r[1] for r in records) / len(records)
+    overall_mean_with = sum(r[2] for r in records) / len(records)
+    n_seeds_improved  = sum(1 for r in records if r[2] > r[1])
+
+    # ── Assertions ─────────────────────────────────────────────────────────
+    assert overall_mean_with > overall_mean_no, (
+        f"use_derivative=True did NOT improve mean alignment across seeds "
+        f"[dendritic_effect='{dendritic_effect}'].\n"
+        f"  Overall mean without : {overall_mean_no:.4f}\n"
+        f"  Overall mean with    : {overall_mean_with:.4f}"
+    )
+
+    min_seeds_required = len(seeds) - 1  # majority: 4 out of 5
+    assert n_seeds_improved >= min_seeds_required, (
+        f"use_derivative=True improved on only {n_seeds_improved}/{len(seeds)} seeds "
+        f"[dendritic_effect='{dendritic_effect}']. "
+        f"Required >= {min_seeds_required}.\n"
+        f"  Per-seed means (no_deriv, with_deriv): "
+        f"{[(f'{r[1]:.4f}', f'{r[2]:.4f}') for r in records]}"
+    )
+
+    # ── Diagnostic print (visible with pytest -s) ──────────────────────────
+    print(f"\n[PASSED] derivative flag alignment improvement "
+          f"[dendritic_effect='{dendritic_effect}']")
+    print(f"  {'seed':<6} {'no_deriv':>10} {'with_deriv':>12} {'delta':>8}  per-layer-delta")
+    for seed, mean_no, mean_with, sims_no, sims_with in records:
+        delta = mean_with - mean_no
+        layer_deltas = [f"{w-n:+.4f}" for w, n in zip(sims_with, sims_no)]
+        improved = "✓" if mean_with > mean_no else "✗"
+        print(f"  {seed:<6} {mean_no:>10.4f} {mean_with:>12.4f} {delta:>+8.4f}  {layer_deltas}  {improved}")
+    print(f"  {'overall':<6} {overall_mean_no:>10.4f} {overall_mean_with:>12.4f} "
+          f"{overall_mean_with - overall_mean_no:>+8.4f}  "
+          f"({n_seeds_improved}/{len(seeds)} seeds improved)")
 
 def test_invalid_mode_raises(tiny_network, tiny_batch):
     """Edge case check: Verifies validation code raises error on garbage strings."""
@@ -61,7 +165,9 @@ def test_invalid_mode_raises(tiny_network, tiny_batch):
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_weights_stay_unchanged(tiny_network, tiny_batch, mode, dendritic_effect):
-    tiny_network.dendritic_effect = dendritic_effect
+    for pop in tiny_network.populations:
+        pop.dendritic_effect = dendritic_effect
+
     x, y = tiny_batch 
     controller = ControlMechanism(mode=mode, max_steps=5)
 
@@ -95,7 +201,9 @@ def test_controls_have_false_required_grad(tiny_network, tiny_batch, mode):
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_early_exit_at_convergence(tiny_network, tiny_batch, mode, dendritic_effect, huge_tolerance = 1000): 
     controller = controller = ControlMechanism(mode=mode)
-    tiny_network.dendritic_effect = dendritic_effect
+    for pop in tiny_network.populations:
+        pop.dendritic_effect = dendritic_effect
+
     x, y = tiny_batch
     controller.tolerance = huge_tolerance  # Set a huge tolerance to force early exit
 
@@ -153,7 +261,8 @@ def test_convergence_reduces_loss(
     feedback matrices, which is gradient-aligned only in expectation, so
     we require a smaller improvement and grant more steps.
     """
-    tiny_network.dendritic_effect = dendritic_effect
+    for pop in tiny_network.populations:
+        pop.dendritic_effect = dendritic_effect
     controller = ControlMechanism(mode=mode, max_steps=max_steps)
     x, y = tiny_batch
 

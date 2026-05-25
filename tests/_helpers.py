@@ -1,4 +1,6 @@
-import torch 
+import torch
+import torch.nn.functional as F
+from core.controllers import ControlMechanism
 
 def _diagnose_layerwise_mismatches(pairs, tol, label):
     """
@@ -31,3 +33,46 @@ def _diagnose_layerwise_mismatches(pairs, tol, label):
             f"  layers failing : {len(failing)}/{len(pairs)}\n"
             + "\n".join(failing)
         )
+
+
+def _prime_and_forward(network, x, dendritic_effect):
+    """
+    Set dendritic mode, run the mandatory baseline pass, then return y from
+    an instantaneous (dynamic_step=False) controlled forward pass with zero
+    controls.  Using dynamic_step=False gives a clean autograd graph:
+    y = f(z), so pop.z.grad from backward() is exactly f'(z) * upstream.
+    """
+    for pop in network.populations:
+        pop.dendritic_effect = dendritic_effect
+
+    controller = ControlMechanism(mode='backprop')
+    zeros = controller.initialize_controls(x.size(0), network.populations)
+
+    with torch.no_grad():
+        network.eval()
+        network.forward(x, control_signals=None, save_baseline=True)
+        network.train()
+
+    return network.forward(x, control_signals=zeros,
+                           save_baseline=False, dynamic_step=False)
+
+
+def _autograd_grads(network, y, global_control):
+    """
+    Compute d/dz_i [(u * y).sum()] via autograd and return the per-layer
+    list.  Must be called AFTER any method that reads pop.z, because
+    backward() releases the computation graph.
+    """
+    for pop in network.populations:
+        if pop.z is not None:
+            pop.z.retain_grad()
+    (global_control * y).sum().backward()
+    return [pop.z.grad.clone() for pop in network.populations]
+
+
+def _cosine_sims(tensor_a, tensor_b):
+    """Per-layer cosine similarity between two lists of tensors."""
+    return [
+        F.cosine_similarity(a.flatten(), b.flatten(), dim=0).item()
+        for a, b in zip(tensor_a, tensor_b)
+    ]

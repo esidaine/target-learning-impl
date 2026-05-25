@@ -23,6 +23,8 @@ class Network(nn.Module):
             for i in range(len(pop_sizes) - 1)
         ])
 
+        self.stats: dict[str, float] = {}
+
         ####
         # FEEDBACK WEIGHT INITIALIZATION: Q_i = J_i^T at init
         #
@@ -66,13 +68,16 @@ class Network(nn.Module):
                 # later if you want DFC-SS.
                 pop.Q.weight.requires_grad = False
 
-        
 
-
-    def project_feedback(self, global_control: torch.Tensor) -> list[torch.Tensor]:
+    def DFC_project_feedback(
+        self,
+        global_control: torch.Tensor,
+        use_derivative: bool = False,
+        log_stats: bool = False,
+    ) -> list[torch.Tensor]:
             """
             DFC credit-assignement
-            DFC uses parallel broadcasting, where the global controller signal $u$ is sent directly to all hidden
+            DFC uses parallel broadcasting, where the global controller signal u is sent directly to all hidden
             layers simultaneously via a feedback matrix
             -------
             list[Tensor]
@@ -94,9 +99,83 @@ class Network(nn.Module):
                 assert isinstance(pop, NeuralPopulation)
                 assert isinstance(pop.Q, nn.Linear)
                 
-                local_controls[i] = F.linear(global_control, pop.Q.weight)
+                c_i = F.linear(global_control, pop.Q.weight)
+                if use_derivative or log_stats:
+                    f_prime = pop.get_bottom_up_activation_derivatives()
+
+                    if log_stats:
+                        # Mean absolute sensitivity — tells you if a layer is saturating
+                        self.stats[f'fprime_mean_layer_{i}'] = f_prime.abs().mean().item()
+                        # Fraction of near-zero derivatives — dead/saturated neuron count
+                        self.stats[f'fprime_dead_frac_layer_{i}'] = (f_prime.abs() < 0.01).float().mean().item()
+
+                    if use_derivative:
+                        c_i = c_i * f_prime
+
+                local_controls[i] = c_i
+
     
             return local_controls
+    
+    def chain_rule_project_feedback(self, global_control):
+            """
+            Route the global control signal backward through the network using the Chain Rule. Note that the weights are frozen. 
+
+            Finds the target state (Psi_i) for the neurons in a given hidden layer 'i'
+
+            The universal equation executed across the layers is:
+                Psi_i = (Psi_{i+1} @ W_{i+1}^T) * f'(z_i)
+
+            Where:
+            - '@' represents matrix multiplication (dot product).
+            - 'W^T' is the transpose of the forward weight matrix.
+            - '*' represents element-wise multiplication.
+            """
+            # Counts the number of hidden layers to know how deep the network is
+            L = len(self.populations) 
+
+            # Creating a fixed array of slots for storing the target controls, slot with idx 0 corresponds to the first hidden layer etc. 
+            control_targets = [None] * L
+
+            # Pre-compute f'(z), the activation derivatives for all neurons per layers/populations
+            neuron_sensitivities = []
+            for pop in self.populations:
+                assert isinstance(pop, NeuralPopulation) # Type guard
+                neuron_sensitivities.append(pop.get_bottom_up_activation_derivatives())
+
+            backward_signal = global_control # This is the initial signal that we want to propagate backward
+
+            # Traverse backwards from the output layer to the first hidden layer
+            for i in reversed(range(L)):
+                # Get the sensitivities f' for the current layer/ population
+                layer_sensitivity = neuron_sensitivities[i]
+
+                if i == L - 1:
+                   layer_target_controls = backward_signal * layer_sensitivity
+
+                else:
+                    # 1. Grab the population and tell Pylance what it is
+                    next_pop = self.populations[i+1]
+                    assert isinstance(next_pop, NeuralPopulation)
+                    
+                    # 2. Tell Pylance that W is definitely an nn.Linear module
+                    assert isinstance(next_pop.W, nn.Linear)
+                    
+                    # 3. Now Pylance knows .weight is a valid Tensor
+                    back_weights = next_pop.W.weight # This is already the transpose
+                    
+                    # We take the message from the layer above and push it backward through the feedback wiring
+                    # We multiply the signal by the neuron's sensitivity
+                    layer_target_controls = torch.matmul(backward_signal, back_weights) * layer_sensitivity
+                
+                # Store the target control for this layer	
+                control_targets[i] = layer_target_controls
+
+                # Update the backward signal for the next iteration (the next layer down)
+                backward_signal = layer_target_controls 
+       
+            return control_targets	
+
 
 
     def forward(self, sensory_inputs, control_signals=None, save_baseline=False, dynamic_step=False):
@@ -261,8 +340,8 @@ class NeuralPopulation(nn.Module):
         returning the neuron to its baseline state for the next sensory input.
         """
         self.a_controlled = None  # type: ignore
+
     
-    # THIS IS TO BE DELETED, MAY BE USED FOR TESTS
     def get_bottom_up_activation_derivatives(self): 
         """
         This function calculates the derivative of the bottom-up (Leaky ReLU) activation function.
@@ -274,10 +353,14 @@ class NeuralPopulation(nn.Module):
         """
         if self.z is None:
             raise RuntimeError("Cannot compute derivative: forward pass hasn't occurred yet - z is still None.")
-        derivative = torch.ones_like(self.z) # Start with a tensor of ones
-        derivative[self.z <= 0] = self.leaky_slope # Set the slope to leaky_slope where z <= 0 using masking
         
-        return derivative
+        z = self.z                          # Pylance narrows this to Tensor
+        sig = torch.sigmoid(z)
+        return sig * (1 + z * (1 - sig)) # SiLU derivative
+        
+        # derivative = torch.ones_like(network.z) # Start with a tensor of ones
+        # derivative[network.z <= 0] = network.leaky_slope # Set the slope to leaky_slope where z <= 0 using masking  
+        # return derivative
     
     
 

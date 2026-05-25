@@ -17,6 +17,7 @@ class OptimizationMetrics:
     steps_taken: int = 0
     converged: bool = False
     loss_history: list[float] = field(default_factory=list)
+    final_control: Optional[torch.Tensor] = None  # last global u, PID only
 
     # Stores a list of time steps. Each time step contains a list of layer activations.
     state_history: list[list[np.ndarray]] = field(default_factory=list)
@@ -52,8 +53,8 @@ class ControlMechanism:
     Generates the control signal (c_n) (per neuron) and finds the optimal control signal (c_n*) that allows the neuron to converge to the target firing rate (a_target).
     Has two implementations: with backpropagation and with PID control 
     """
-    def __init__(self, mode='backprop', lr_c=0.1, momentum=0.5, max_steps=50, 
-             dt=0.1, tau=1.0, alpha=0.01, k_p=0.8):
+    def __init__(self, mode='backprop', lr_c=0.1, momentum=0.5, max_steps=100, 
+             dt=0.1, tau=1.0, alpha=0.01, k_p=0.8, use_derivative=True):
         self.mode = mode
         self.lr_c = lr_c
         self.momentum = momentum
@@ -63,6 +64,7 @@ class ControlMechanism:
         self.tau = tau
         self.alpha = alpha
         self.k_p = k_p
+        self.use_derivative = use_derivative
 
     def initialize_controls(self, batch_size, neuron_populations):
         """
@@ -128,7 +130,7 @@ class ControlMechanism:
                 )
         elif self.mode == 'pid':
             optimized_controls = self._optimize_via_pid(
-                initial_controls, sensory_inputs, target_y, network, baseline_pred, metrics
+                initial_controls, sensory_inputs, target_y, network, baseline_pred, metrics, self.use_derivative
             )
         else:
             raise ValueError("Mode must be 'backprop' or 'pid'")
@@ -141,6 +143,7 @@ class ControlMechanism:
                 f"in {metrics.steps_taken} steps"
             )
 
+        
         return optimized_controls, metrics
         
     def _optimize_via_backprop(self, control_signals, sensory_inputs, target_y, network, metrics):
@@ -189,7 +192,7 @@ class ControlMechanism:
         return [c_n.detach() for c_n in control_signals]
        
     @torch.no_grad() # Turn off PyTorch autograd for PID. That means we won't use W.T for the feedback
-    def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred, metrics):
+    def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred, metrics, use_derivative=True):
         """
         The controller pushes, the neurons move, the controller checks the new output, 
         and pushes again. This happens continuously over your max_steps loop. 
@@ -216,7 +219,9 @@ class ControlMechanism:
 
         # control signals were created with required_grad=True, so detach for safety
         local_controls = [c.detach() for c in control_signals]
-
+        
+        # Initialize the global control signal to zeros (shape [batch_size, num_output_neurons])
+        global_control = torch.zeros(batch_size, output_size, device=sensory_inputs.device)
 
         # Dynamic inversion: 
         # Finding the ideal activation state for each neuron to match the final output target
@@ -242,7 +247,7 @@ class ControlMechanism:
             # ==========================================
             # CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD 
             # ==========================================
-            local_controls = network.project_feedback(global_control)
+            local_controls = network.chain_rule_project_feedback(global_control)
 
             # ==========================================
             # SIMULATE A FORWARD PASS 
@@ -261,6 +266,8 @@ class ControlMechanism:
      
             if manim_snapshot:
                 make_manim_snapshot(network, local_controls, metrics)
+
+        metrics.final_control = global_control  # save last u for diagnostics
 
         return local_controls
    

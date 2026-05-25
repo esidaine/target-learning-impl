@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
-from utils.utils import get_logger
+from utils.utils import get_logger, log_feedback_alignment
+import logging
 
 logger = get_logger()
+logging.getLogger().setLevel(logging.DEBUG)
 
 class Trainer:
-    def __init__(self, network, controller, plasticity):
+    def __init__(self, network, controller, plasticity, log_every: int = 10):
         """
         The manager class that binds the Network, ControlMechanism, and Plasticity classes.
         We go through several loops of free phase, settling phase and weight-change phase. 
@@ -17,6 +19,9 @@ class Trainer:
 
         # Measures the baseline prediction where c_n​ = 0
         self.criterion = nn.MSELoss()
+
+        self.step = 0          # global batch counter
+        self.log_every = log_every
 
     def train_one_epoch(self, dataloader)-> tuple[float, float]:
         self.network.train() # mark training mode 
@@ -65,6 +70,11 @@ class Trainer:
             # We grab the baseline activation from the very last layer (spacially).
             baseline_predictions = self.network.populations[-1].a_baseline
             
+            if self.step % self.log_every == 0 and metrics.final_control is not None:
+                log_feedback_alignment(self.network, global_control = metrics.final_control)
+
+            self.step += 1
+                        
             # Calculate the loss 
             # Is the network actually getting the predictions right?
             # When the baseline activation matches a^c*, then we have 

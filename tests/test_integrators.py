@@ -10,7 +10,8 @@ def test_firing_rate_dynamics_converge(tiny_network, tiny_batch, dendritic_effec
     for the currently held control signals. The fixed point is just a_controlled = target_activation
     """
     x,_ = tiny_batch
-    tiny_network.dendritic_effect = dendritic_effect
+    for pop in tiny_network.populations:
+        pop.dendritic_effect = dendritic_effect
 
     # 1. Free pass: seeds a_baseline in every population so a_controlled
     #    has something to initialize from on the first dynamic step.

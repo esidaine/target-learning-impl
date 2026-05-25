@@ -1,7 +1,9 @@
 import pytest
 import torch
 from models.network import Network
-
+from data.xor.dataset import get_dataloader
+import logging
+logging.getLogger().setLevel(logging.DEBUG)
 
 """
 pytest                          # run everything
@@ -53,3 +55,8 @@ def mnist_tiny_batch():
     y = torch.zeros(4, 10)
     y[range(4), torch.tensor([0, 1, 2, 3])] = 1.0
     return x, y
+
+@pytest.fixture
+def xor_dataloader():
+    """Fixed-order XOR loader — identical data sequence for both conditions."""
+    return get_dataloader(batch_size=4, shuffle=False)

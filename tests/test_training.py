@@ -7,7 +7,8 @@ import pytest
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
 def test_single_step_loss_decreases(tiny_network, tiny_batch, mode, dendritic_effect): 
-    tiny_network.dendritic_effect = dendritic_effect
+    for pop in tiny_network.populations:
+        pop.dendritic_effect = dendritic_effect
     
     controller = ControlMechanism(mode=mode)
     plasticity = Plasticity(lr_w=0.5) 
