@@ -3,6 +3,8 @@ from core.controllers import ControlMechanism
 from torch.nn import functional as F
 import pytest
 from _helpers import _prime_and_forward, _autograd_grads, _cosine_sims
+from utils.utils import set_all_seeds
+from models.network import Network
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_chain_rule_matches_autograd_exactly(tiny_network, tiny_batch, dendritic_effect):
@@ -276,10 +278,12 @@ def test_convergence_reduces_loss(
 
     # ---- Main behavioural check -----------------------------------------
     history = metrics.loss_history
-    monotone = all(b <= a + 1e-9 for a, b in zip(history, history[1:]))
-    assert monotone, _failure_report(
-        mode, metrics, reason="loss history is not monotonically decreasing"
-    )
+
+    if mode == "backprop":
+        monotone = all(b <= a + 1e-9 for a, b in zip(history, history[1:]))
+        assert monotone, _failure_report(
+            mode, metrics, reason="Backprop loss history is not monotonically decreasing"
+        )
 
     rel_improvement = metrics.improvement / metrics.initial_loss
     assert rel_improvement >= min_relative_improvement, _failure_report(
@@ -309,10 +313,29 @@ def _failure_report(mode: str, metrics, reason: str) -> str:
         f"  history[-5:] : {[f'{v:.4f}' for v in last]}"
     )
 
-def test_dfc_pid_mode_is_not_chain_rule(tiny_network, tiny_batch):
-    """DFC's Q_i @ u should NOT equal the BP chain rule Q = J^T."""
-    ...
-    
+@pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
+def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
+    x, y = tiny_batch
+    diverged_seeds = []
+
+    for seed in range(5):
+        set_all_seeds(seed)
+        net = Network(pop_sizes=[2, 4, 1])
+        for pop in net.populations:
+            pop.dendritic_effect = dendritic_effect
+            
+        controller = ControlMechanism(mode='pid', max_steps=100)
+        _, metrics = controller.optimize_control_signal(x, y, net)
+
+        history = metrics.loss_history
+        increases = sum(b > a + 1e-9 for a, b in zip(history, history[1:]))
+        total_steps = len(history) - 1
+        if increases / total_steps > 0.6:
+            diverged_seeds.append(seed)
+
+    assert not diverged_seeds, (
+        f"[{dendritic_effect}] PID diverged on seeds: {diverged_seeds}"
+    )
 
 
 

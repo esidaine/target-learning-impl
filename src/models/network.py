@@ -295,7 +295,7 @@ class NeuralPopulation(nn.Module):
             # When c_n is very negative, q_c approaches 0 (silences the neuron).
             # When c_n is very positive, q_c approaches 2 (doubles the bottom-up rate).
             # phi_z = F.leaky_relu(z, negative_slope=self.leaky_slope)
-            phi_z = F.silu(z)
+            phi_z = F.relu(z) # no leak because negative phi(z) introduces slightly negative Jacobian contribution for negative neurons, which can cause instability in the dynamics. ReLU keeps the Jacobian contribution non-negative.  
             q_c = self.dendritic_proc(c_n)
             target_activation = (beta * q_c) * phi_z 
         elif self.dendritic_effect == "additive":
@@ -303,7 +303,7 @@ class NeuralPopulation(nn.Module):
             z_controlled = z + torch.tanh(c_n)
             # NOW pass it through the nonlinearity
             # Note that the leaky ReLU is applied after the additive combination, so the control signal can push the neuron from subthreshold to suprathreshold or vice versa.
-            target_activation = F.silu(z_controlled) # Switched to SiLU for smoother gradients, but you can switch back to leaky ReLU if you prefer. 
+            target_activation = F.leaky_relu(z_controlled) # Switched to SiLU for smoother gradients, but you can switch back to leaky ReLU if you prefer. 
             #target_activation = F.leaky_relu(z_controlled, negative_slope=self.leaky_slope)
         else:
             raise ValueError(f"Invalid dendritic_effect: {self.dendritic_effect}. Must be 'multiplicative' or 'additive'.")
@@ -353,14 +353,14 @@ class NeuralPopulation(nn.Module):
         """
         if self.z is None:
             raise RuntimeError("Cannot compute derivative: forward pass hasn't occurred yet - z is still None.")
+        z = self.z
         
-        z = self.z                          # Pylance narrows this to Tensor
-        sig = torch.sigmoid(z)
-        return sig * (1 + z * (1 - sig)) # SiLU derivative
-        
-        # derivative = torch.ones_like(network.z) # Start with a tensor of ones
-        # derivative[network.z <= 0] = network.leaky_slope # Set the slope to leaky_slope where z <= 0 using masking  
-        # return derivative
+        if self.dendritic_effect == "additive":
+            # LeakyReLU derivative
+            return torch.where(z > 0, torch.ones_like(z), torch.full_like(z, self.leaky_slope))
+        else:
+            # ReLU derivative
+            return (z > 0).float()
     
     
 

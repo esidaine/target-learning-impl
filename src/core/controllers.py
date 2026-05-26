@@ -192,7 +192,7 @@ class ControlMechanism:
         return [c_n.detach() for c_n in control_signals]
        
     @torch.no_grad() # Turn off PyTorch autograd for PID. That means we won't use W.T for the feedback
-    def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred, metrics, use_derivative=True):
+    def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred, metrics, use_derivative):
         """
         The controller pushes, the neurons move, the controller checks the new output, 
         and pushes again. This happens continuously over your max_steps loop. 
@@ -247,7 +247,8 @@ class ControlMechanism:
             # ==========================================
             # CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD 
             # ==========================================
-            local_controls = network.chain_rule_project_feedback(global_control)
+            local_controls = network.DFC_project_feedback(global_control, use_derivative=use_derivative)
+            # local_controls = network.chain_rule_project_feedback(global_control) 
 
             # ==========================================
             # SIMULATE A FORWARD PASS 

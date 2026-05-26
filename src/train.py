@@ -37,8 +37,8 @@ def main():
     config = ExperimentConfig(
         task="xor",
         mode="pid",             # Choose 'backprop' or 'pid'
-        dendritic_effect="additive", # Choose 'additive' or 'multiplicative'
-        epochs=1800,
+        dendritic_effect="multiplicative", # Choose 'additive' or 'multiplicative'
+        epochs=800,
         seed=7,
         pop_sizes=[2, 8, 1], 
         controller=PIDControlParams(),
