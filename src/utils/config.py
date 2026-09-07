@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Literal, Union
+from typing import List, Literal, Union, Optional
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
@@ -9,7 +9,7 @@ class PIDControlParams:
     dt: float = 0.1
     tau: float = 1.0
     alpha: float = 0.01
-    max_steps: int = 100
+    max_steps: int = 5 # CHANGE TO 100 again
     use_derivative: bool = True
 
 @dataclass
@@ -20,7 +20,7 @@ class BackpropControlParams:
 
 @dataclass
 class PIDPlasticityParams:
-    lr_w: float = 0.05
+    lr_w: float = 0.0001 # CHANGE TO 0.05 for real training with xor
 
 @dataclass
 class BackpropPlasticityParams:
@@ -33,10 +33,10 @@ class ExperimentConfig:
     task: Literal["xor", "mnist"] = "xor"
     mode: Literal["backprop", "pid"] = "pid"
     seed: int = 7
-    epochs: int = 1500
+    epochs: int = 10 # CHANGE TO 800 for real training with xor
     
     # 2. Network Anatomy
-    pop_sizes: List[int] = field(default_factory=lambda: [2, 4, 1])
+    pop_sizes: Optional[List[int]] = None
     dendritic_effect: Literal["additive", "multiplicative"] = "additive"
     leaky_slope: float = 0.01
     
@@ -46,6 +46,13 @@ class ExperimentConfig:
 
     def __post_init__(self):
         """Ensures the correct sub-configs match the selected mode."""
+        if self.pop_sizes is None:
+            self.pop_sizes = (
+                [2, 4, 1]
+                if self.task == "xor"
+                else [784, 256, 128, 64, 10]
+            )
+
         if self.mode == "pid":
             if not isinstance(self.controller, PIDControlParams):
                 raise ValueError(f"Mismatch: mode is 'pid', but controller is {type(self.controller).__name__}")

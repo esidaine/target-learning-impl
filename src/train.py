@@ -21,7 +21,8 @@ for p in (root, root / 'src'):
 from models.network import Network
 from core.controllers import ControlMechanism
 from core.plasticity import Plasticity
-from data.xor.dataset import get_dataloader
+from data.xor.dataset import get_dataloader as get_xor_dataloader
+from data.mnist.dataset import get_dataloader as get_mnist_dataloader
 from core.trainer import Trainer
 from utils.utils import set_all_seeds, save_experiment, get_weight_metrics, get_logger
 from utils.config import ExperimentConfig, BackpropControlParams, PIDControlParams, BackpropPlasticityParams, PIDPlasticityParams
@@ -33,14 +34,78 @@ import wandb
 logger = get_logger()
 
 
+def evaluate_model(network, task: str) -> None:
+    """Evaluate the trained model using the dataset selected by the experiment."""
+    network.eval()
+
+    if task == "xor":
+        inputs = torch.tensor(
+            [[0., 0.], [0., 1.], [1., 0.], [1., 1.]],
+            dtype=torch.float32,
+        )
+        targets = torch.tensor([0., 1., 1., 0.], dtype=torch.float32)
+
+        with torch.no_grad():
+            predictions = network(
+                inputs,
+                control_signals=None,
+                save_baseline=False,
+            ).squeeze()
+
+        predicted_labels = (predictions >= 0.5).float()
+        print(f"{'input':>8} | {'target':>6} | {'raw':>8} | {'pred':>4} | {'ok':>3}")
+        print("-" * 42)
+        for input_value, target, prediction, predicted_label in zip(
+            inputs, targets, predictions, predicted_labels
+        ):
+            status = "ok" if predicted_label == target else "--"
+            print(
+                f"{input_value.tolist()!s:>8} | {int(target):>6} | "
+                f"{prediction.item():>8.3f} | {int(predicted_label):>4} | {status:>3}"
+            )
+
+        accuracy = (predicted_labels == targets).float().mean().item()
+        print(f"\nXOR accuracy: {accuracy:.2%}")
+        return
+
+    if task != "mnist":
+        raise ValueError(f"Unsupported evaluation task: {task}")
+
+    test_loader = get_mnist_dataloader(
+        batch_size=256,
+        train=False,
+        shuffle=False,
+        num_workers=0,
+    )
+    criterion = torch.nn.MSELoss(reduction="sum")
+    total_loss = 0.0
+    correct = 0
+    total = 0
+
+    with torch.no_grad():
+        for inputs, targets in test_loader:
+            predictions = network(
+                inputs,
+                control_signals=None,
+                save_baseline=False,
+            )
+            target_labels = targets.argmax(dim=1)
+            predicted_labels = predictions.argmax(dim=1)
+
+            total_loss += criterion(predictions, targets).item()
+            correct += (predicted_labels == target_labels).sum().item()
+            total += targets.size(0)
+
+    print(f"\nMNIST test loss: {total_loss / total:.6f}")
+    print(f"MNIST test accuracy: {correct / total:.2%} ({correct}/{total})")
+
+
 def main():
     config = ExperimentConfig(
-        task="xor",
+        task="mnist",
         mode="pid",             # Choose 'backprop' or 'pid'
         dendritic_effect="multiplicative", # Choose 'additive' or 'multiplicative'
-        epochs=800,
         seed=7,
-        pop_sizes=[2, 8, 1], 
         controller=PIDControlParams(),
         plasticity=PIDPlasticityParams()
     )
@@ -70,7 +135,15 @@ def main():
 
     # 3. Initialize variables, pbar and objects for training
     trainer = Trainer(network, controller, plasticity)
-    dataloader = get_dataloader(batch_size=4, shuffle=True)
+    if config.task == "mnist":
+        dataloader = get_mnist_dataloader(
+            batch_size=64,
+            shuffle=True,
+            num_classes=config.pop_sizes[-1],
+        )
+    else:
+        dataloader = get_xor_dataloader(batch_size=4, shuffle=True)
+
 
     best_loss = float('inf')
     current_avg_loss = float('inf')
@@ -144,21 +217,7 @@ def main():
 
         print(f"Successfully exported {len(metrics.state_history)} steps to {history_filename}!")
 
-    # Diagnostic evaluation of the final trained model on the XOR task
-    with torch.no_grad():
-        xor_inputs = torch.tensor([[0.,0.],[0.,1.],[1.,0.],[1.,1.]])
-        targets   = torch.tensor([0., 1., 1., 0.])
-        preds     = network(xor_inputs, control_signals=None, save_baseline=False).squeeze()
-        predicted = (preds >= 0.5).float()
-
-        print(f"{'input':>8} | {'target':>6} | {'raw':>8} | {'pred':>4} | {'ok':>3}")
-        print("-" * 42)
-        for x, t, p, pc in zip(xor_inputs, targets, preds, predicted):
-            ok = "✓" if pc == t else "✗"
-            print(f"{x.tolist()!s:>8} | {int(t):>6} | {p.item():>8.3f} | {int(pc):>4} | {ok:>3}")
-
-        acc = (predicted == targets).float().mean().item()
-        print(f"\naccuracy: {acc:.0%}")
+    evaluate_model(network, config.task)
 
 if __name__ == "__main__":
     main()

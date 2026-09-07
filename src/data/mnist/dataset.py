@@ -64,10 +64,12 @@ class MNISTDataset(Dataset):
 
 def get_dataloader(
     batch_size: int = 64,
+    root_dir: str = "./data",
     train: bool = True,
     shuffle: Optional[bool] = None,
-    num_workers: int = 4,
+    num_workers: int = 0,
     flatten: bool = True,
+    num_classes: int = 10,
     target_on: float = 1.0,
     target_off: float = 0.05,
     norm_mean: float = 0.1307,
@@ -97,8 +99,10 @@ def get_dataloader(
 
     # Pass the dynamical constraints down into the dataset
     dataset = MNISTDataset(
+        root_dir=root_dir,
         train=train,
         flatten=flatten,
+        num_classes=num_classes,
         target_on=target_on,
         target_off=target_off,
         norm_mean=norm_mean,
@@ -120,5 +124,5 @@ def get_dataloader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=True,  # Speeds up CPU-to-GPU memory transfer
+        pin_memory=torch.cuda.is_available(),
     )
