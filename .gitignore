@@ -107,3 +107,4 @@ Thumbs.db
 network_history.pkl
 media/
 data/MNIST/
+evaluation_results/
