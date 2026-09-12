@@ -102,10 +102,10 @@ def evaluate_model(network, task: str) -> None:
 
 def main():
     config = ExperimentConfig(
-        task="mnist",
+        task="mnist",           # Choose 'mnist' or 'xor'
         mode="pid",             # Choose 'backprop' or 'pid'
-        dendritic_effect="multiplicative", # Choose 'additive' or 'multiplicative'
-        seed=7,
+        dendritic_effect="additive", # Choose 'additive' or 'multiplicative'
+        seed=42,
         controller=PIDControlParams(),
         plasticity=PIDPlasticityParams()
     )

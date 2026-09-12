@@ -1,13 +1,18 @@
 import torch
 import torch.nn as nn
 from utils.utils import get_logger, log_feedback_alignment
-import logging
 
 logger = get_logger()
-logging.getLogger().setLevel(logging.DEBUG)
 
 class Trainer:
-    def __init__(self, network, controller, plasticity, log_every: int = 10):
+    def __init__(
+        self,
+        network,
+        controller,
+        plasticity,
+        refresh_feedback: bool = True,
+        log_every: int = 10,
+    ):
         """
         The manager class that binds the Network, ControlMechanism, and Plasticity classes.
         We go through several loops of free phase, settling phase and weight-change phase. 
@@ -16,6 +21,7 @@ class Trainer:
         self.network = network
         self.controller = controller
         self.plasticity = plasticity
+        self.refresh_feedback = refresh_feedback
 
         # Measures the baseline prediction where c_n​ = 0
         self.criterion = nn.MSELoss()
@@ -62,6 +68,8 @@ class Trainer:
             # ==========================================
             # The weights are updated based on the difference between a_controlled and a_baseline.
             self.plasticity.update_weights(network=self.network, sensory_inputs=sensory_inputs)
+            if self.refresh_feedback:
+                self.network.refresh_feedback_weights()
 
             # ==========================================
             # 3. MONITORING 

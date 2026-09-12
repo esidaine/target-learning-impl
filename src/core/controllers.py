@@ -54,7 +54,8 @@ class ControlMechanism:
     Has two implementations: with backpropagation and with PID control 
     """
     def __init__(self, mode='backprop', lr_c=0.1, momentum=0.5, max_steps=100, 
-             dt=0.1, tau=1.0, alpha=0.01, k_p=0.8, use_derivative=True):
+             dt=0.1, tau=1.0, alpha=0.01, k_p=0.8, use_derivative=True,
+             feedback_mode="dfc"):
         self.mode = mode
         self.lr_c = lr_c
         self.momentum = momentum
@@ -65,6 +66,9 @@ class ControlMechanism:
         self.alpha = alpha
         self.k_p = k_p
         self.use_derivative = use_derivative
+        if feedback_mode not in {"dfc", "chain"}:
+            raise ValueError("feedback_mode must be 'dfc' or 'chain'")
+        self.feedback_mode = feedback_mode
 
     def initialize_controls(self, batch_size, neuron_populations):
         """
@@ -247,8 +251,12 @@ class ControlMechanism:
             # ==========================================
             # CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD 
             # ==========================================
-            local_controls = network.DFC_project_feedback(global_control, use_derivative=use_derivative)
-            # local_controls = network.chain_rule_project_feedback(global_control) 
+            if self.feedback_mode == "chain":
+                local_controls = network.chain_rule_project_feedback(global_control)
+            else:
+                local_controls = network.DFC_project_feedback(
+                    global_control, use_derivative=use_derivative
+                )
 
             # ==========================================
             # SIMULATE A FORWARD PASS 

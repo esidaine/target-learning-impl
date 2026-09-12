@@ -68,6 +68,24 @@ class Network(nn.Module):
                 # later if you want DFC-SS.
                 pop.Q.weight.requires_grad = False
 
+    @torch.no_grad()
+    def refresh_feedback_weights(self) -> None:
+        """Refresh fixed feedback from the current downstream forward weights."""
+        last_index = len(self.populations) - 1
+        for index, population in enumerate(self.populations):
+            if index == last_index:
+                population.Q.weight.copy_(torch.eye(
+                    population.num_neurons,
+                    device=population.Q.weight.device,
+                    dtype=population.Q.weight.dtype,
+                ))
+                continue
+
+            feedback_matrix = self.populations[index + 1].W.weight
+            for downstream_index in range(index + 2, len(self.populations)):
+                feedback_matrix = self.populations[downstream_index].W.weight @ feedback_matrix
+            population.Q.weight.copy_(feedback_matrix.t())
+
 
     def DFC_project_feedback(
         self,
@@ -241,7 +259,7 @@ class NeuralPopulation(nn.Module):
         
         # Forward weights, disable biases and gradient tracking
         self.W = nn.Linear(num_inputs, num_neurons, bias=True)
-        nn.init.uniform_(self.W.bias, -0.5, 0.5)
+        nn.init.constant_(self.W.bias, 0.1)
         self.W.weight.requires_grad = False
         self.W.bias.requires_grad = False
         
@@ -294,8 +312,9 @@ class NeuralPopulation(nn.Module):
             # 2. Get the top-down apical activation
             # When c_n is very negative, q_c approaches 0 (silences the neuron).
             # When c_n is very positive, q_c approaches 2 (doubles the bottom-up rate).
-            # phi_z = F.leaky_relu(z, negative_slope=self.leaky_slope)
-            phi_z = F.relu(z) # no leak because negative phi(z) introduces slightly negative Jacobian contribution for negative neurons, which can cause instability in the dynamics. ReLU keeps the Jacobian contribution non-negative.  
+            # ReLU keeps the multiplicative gain non-negative, matching the
+            # fixed feedback and local plasticity assumptions used here.
+            phi_z = F.relu(z)
             q_c = self.dendritic_proc(c_n)
             target_activation = (beta * q_c) * phi_z 
         elif self.dendritic_effect == "additive":
@@ -359,7 +378,7 @@ class NeuralPopulation(nn.Module):
             # LeakyReLU derivative
             return torch.where(z > 0, torch.ones_like(z), torch.full_like(z, self.leaky_slope))
         else:
-            # ReLU derivative
+            # ReLU derivative, matching the multiplicative forward path.
             return (z > 0).float()
     
     

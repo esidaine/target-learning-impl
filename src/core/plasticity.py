@@ -16,21 +16,21 @@ class Plasticity:
     def learning_rule(self, a_pre, a_baseline, a_controlled):  
         # 1. Calculate the difference between the target activation and baseline activation
         # Shape: [batch_size, num_neurons]
-        errors = a_controlled - a_baseline
+        activation_delta = a_controlled - a_baseline
         
         # 2. Matrix multiplication to get the outer product, summing across the batch
-        # errors.T shape: [num_neurons, batch_size]
+        # activation_delta.T shape: [num_neurons, batch_size]
         # a_pre shape: [batch_size, num_inputs]
         # delta_W shape: [num_neurons, num_inputs]
-        delta_W = torch.matmul(errors.T, a_pre)
+        delta_W = torch.matmul(activation_delta.T, a_pre)
 
-        # 3. Divide by batch size to get the average weight update
+        # 3. Divide by batch size to get the average weight update to compute the average weight update per training example
         batch_size = a_pre.size(0)
-        delta_W = torch.matmul(errors.T, a_pre) / batch_size
+        delta_W_batched = delta_W / batch_size
 
         # 4. Calculate bias updates as the average error across the batch
-        delta_b = errors.mean(dim=0)
-        return delta_W, delta_b
+        delta_b = activation_delta.mean(dim=0)
+        return delta_W_batched, delta_b
 
     @torch.no_grad() # Turn off gradients since we are doing manual weight updates
     def update_weights(self, network, sensory_inputs): 
