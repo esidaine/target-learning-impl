@@ -65,18 +65,20 @@ $$\Delta W_i = \frac{\eta_w}{B} \sum_{b=1}^{B} \left(a_{i,b}^{\mathrm{ctrl}} - a
 
 ```text
 ├── src/
-│   ├── train.py             # Main entry point for single-run experiments
-│   ├── evaluation.py        # Benchmark suite across seeds and dendritic modes
-│   ├── ablations.py         # XOR mechanism ablation runner
-│   ├── core/                # Controllers, plasticity rules, and integrators
-│   ├── data/                # Data loaders (MNIST, XOR)
-│   ├── models/              # Neural population definitions
-│   └── utils/               # Dataclass configs and seed management
-├── pytests/                  # Unit and integration test suite
-├── xor_proof_of_mechanism.py  # Plotting of performance on the XOR task
-├── ablations.py  # Ablation study on the XOR task
-├── mnist_evaluation.py  # Tracking and Plotting of MNIST diagnostics and performance
-
+│   ├── train.py                   # Single-run training entry point
+│   ├── core/                      # Controllers, plasticity rules, and integrators
+│   ├── data/                      # Data loaders for XOR and MNIST
+│   ├── models/                    # Network building blocks and population logic
+│   └── utils/                     # Config dataclasses, seed helpers, and logging
+├── ablations.py                   # XOR ablation study runner
+├── mnist_evaluation.py             # MNIST benchmark and diagnostics plots
+├── xor_proof_of_mechanism.py       # XOR mechanism diagnostics and seed plots
+├── pytests/                        # Unit and integration tests
+├── requirements.txt                # Python dependencies
+├── pyproject.toml                  # Package metadata and tooling config
+├── data/                           # Local dataset cache (MNIST)
+├── evaluation_results/             # Generated benchmark outputs
+└── README.md                       # Project overview and usage notes
 ```
 
 ---
@@ -88,6 +90,7 @@ $$\Delta W_i = \frac{\eta_w}{B} \sum_{b=1}^{B} \left(a_{i,b}^{\mathrm{ctrl}} - a
 - Python 3.10+
 - PyTorch & Torchvision
 - Matplotlib, NumPy, pytest
+- Optional: Weights & Biases (`wandb`) if you enable logging in the training entrypoint
 
 ### Installation
 
@@ -112,8 +115,7 @@ pip install -r requirements.txt
 
 ### 1. Single-Configuration Training
 
-First, check config.py and define the desired parameters. Also verify, the parameters selected in main in train.py
-Then, run a default single-seed MNIST or XOR training run with:
+Edit the config in [src/utils/config.py](src/utils/config.py) and the experimental setup in [src/train.py](src/train.py), then run a default single-seed training job:
 
 ```bash
 python src/train.py
@@ -121,22 +123,22 @@ python src/train.py
 
 ### 2. Matched MNIST Benchmarking
 
-Run evaluation across multiple seeds to compare additive vs. multiplicative dendritic integration. This may take a while:
+Run the MNIST benchmark across multiple seeds to compare additive and multiplicative dendritic integration. This may take a while:
 
 ```bash
-python src/mnist_evaluation.py --epochs 100 --seeds 7 42
+python mnist_evaluation.py --epochs 100 --seeds 7 42
 ```
 
 ### 3. XOR Mechanism & Ablation Experiments
 
-To see the results for the XOR task, run the following:
+To reproduce the XOR diagnostics and ablation sweeps:
 
 ```bash
 # Mechanism diagnostics across seeds
-python src/xor_proof_of_mechanism.py --epochs 750 --dendritic-effect multiplicative
+python xor_proof_of_mechanism.py --epochs 750 --dendritic-effect multiplicative
 
 # Ablation experiment (Full Method vs. No Control vs. Controller Only)
-python src/ablations.py --epochs 750
+python ablations.py --epochs 750
 ```
 
 ---
@@ -157,7 +159,7 @@ pytest
 - **Feedback Matrix Updates:** Feedback matrices $Q_i$ are initialized from transpose forward weights $W_i^T$ and refreshed regularly.
 - **Control Formulation:** The controller can operate in backpropagation and PI mode. The configuration parameter `use_derivative` modulates feedback via pre-activation derivatives rather than a true PID derivative term.
 - **Multiplicative Controllability:** In multiplicative mode, dead units ($\text{ReLU}(z_i) \le 0$) yield zero local derivative, which can induce inactive dead-zone dynamics.
-- **Logging:** Weights & Biases integration and model checkpointing are supported in `utils/utils.py` but disabled by default in entry scripts.
+- **Logging:** Weights & Biases integration and checkpointing hooks are supported in [src/utils/utils.py](src/utils/utils.py), but they are disabled by default in the main entry scripts.
 
 ---
 
