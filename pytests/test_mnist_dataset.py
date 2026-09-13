@@ -9,7 +9,14 @@ from utils.config import ExperimentConfig
 
 
 def test_mnist_batch_is_ready_for_training():
-    """A real MNIST batch has the shape and target format the network expects."""
+    """Check that a real MNIST batch matches the network training interface.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     config = ExperimentConfig(task="mnist")
     batch_size = 8
     expected_input_features = config.pop_sizes[0]

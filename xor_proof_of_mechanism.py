@@ -44,7 +44,23 @@ def train_one_seed(
     hidden_width: int = 8,
     feedback_mode: str = "dfc",
 ) -> dict[str, object]:
-    """Train one XOR model and return learning and mechanism diagnostics."""
+    """Train one XOR model and return learning and mechanism diagnostics.
+
+    Args:
+        seed (int): Random seed for initialization and data order.
+        epochs (int): Number of training epochs.
+        mode (str): Controller mode, typically ``"pid"`` or ``"backprop"``.
+        dendritic_effect (str): Dendritic interaction mode used by the network.
+        lr_w (float | None): Optional override for the plasticity learning rate.
+        k_p (float | None): Optional override for the PID proportional gain.
+        bias_mode (str): Bias initialization strategy.
+        refresh_feedback (bool): Whether to refresh feedback weights after updates.
+        hidden_width (int): Width of the hidden layer.
+        feedback_mode (str): Feedback projection mode used by the controller.
+
+    Returns:
+        dict[str, object]: Per-seed training curves and final evaluation metrics.
+    """
     set_all_seeds(seed)
 
     if mode == "pid":
@@ -182,7 +198,17 @@ def plot_learning_curve(
     mode: str,
     dendritic_effect: str,
 ) -> None:
-    """Save individual seed traces and the mean +/- one standard deviation."""
+    """Save individual seed traces and the mean +/- one standard deviation.
+
+    Args:
+        histories (dict[int, list[float]]): Mapping from seed to per-epoch loss curve.
+        output_path (Path): Destination path for the rendered plot.
+        mode (str): Controller mode used in the experiment.
+        dendritic_effect (str): Dendritic effect used in the experiment.
+
+    Returns:
+        None.
+    """
     values = np.asarray(list(histories.values()), dtype=float)
     epochs = np.arange(1, values.shape[1] + 1)
     mean = values.mean(axis=0)
@@ -227,6 +253,14 @@ def plot_seed_diagnostics(
 
     Final MSE, accuracy, threshold epoch, and instability remain in the JSON
     and CSV summaries because they are single end-of-run values, not curves.
+
+    Args:
+        results (list[dict[str, object]]): Per-seed experiment results.
+        output_path (Path): Destination path for the diagnostics plot.
+        mse_threshold (float): MSE threshold line shown in the first subplot.
+
+    Returns:
+        None.
     """
     figure, axes = plt.subplots(1, 3, figsize=(15, 4.5), constrained_layout=True)
     plot_specs = [
@@ -274,7 +308,15 @@ def plot_final_predictions(
     results: list[dict[str, object]],
     output_path: Path,
 ) -> None:
-    """Plot the four final autonomous-inference XOR predictions for every seed."""
+    """Plot the four final autonomous-inference XOR predictions for every seed.
+
+    Args:
+        results (list[dict[str, object]]): Per-seed experiment results.
+        output_path (Path): Destination path for the predictions plot.
+
+    Returns:
+        None.
+    """
     labels = ["00", "01", "10", "11"]
     targets = np.array([0.0, 1.0, 1.0, 0.0])
     figure, axis = plt.subplots(figsize=(8, 5))
@@ -301,6 +343,14 @@ def plot_final_predictions(
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line options for the XOR mechanism experiment.
+
+    Args:
+        None.
+
+    Returns:
+        argparse.Namespace: Parsed training, ablation, and output options.
+    """
     parser = argparse.ArgumentParser(
         description="Plot autonomous inference XOR MSE across multiple random seeds."
     )
@@ -371,6 +421,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run the XOR mechanism experiment and write diagnostic artifacts.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     args = parse_args()
     if args.epochs < 1:
         raise ValueError("--epochs must be at least 1")
@@ -393,8 +451,11 @@ def main() -> None:
 
     for result in results:
         result["threshold_epoch"] = next(
-            (epoch for epoch, loss in enumerate(result["epoch_losses"], start=1)
-             if loss <= args.mse_threshold),
+            (
+                epoch
+                for epoch, loss in enumerate(result["epoch_losses"], start=1)
+                if loss <= args.mse_threshold
+            ),
             None,
         )
 
@@ -422,7 +483,7 @@ def main() -> None:
                     "lr_w": args.lr_w,
                     "k_p": args.k_p,
                     "bias_mode": args.bias_mode,
-                                        "refresh_feedback": args.refresh_feedback,
+                    "refresh_feedback": args.refresh_feedback,
                     "hidden_width": args.hidden_width,
                     "feedback_mode": args.feedback_mode,
                     "mse_threshold": args.mse_threshold,
@@ -439,22 +500,30 @@ def main() -> None:
         writer = csv.DictWriter(
             file,
             fieldnames=[
-                "seed", "final_no_control_mse", "final_xor_accuracy",
-                "threshold_epoch", "unstable", "mean_control_failure_rate",
+                "seed",
+                "final_no_control_mse",
+                "final_xor_accuracy",
+                "threshold_epoch",
+                "unstable",
+                "mean_control_failure_rate",
                 "mean_control_magnitude",
             ],
         )
         writer.writeheader()
         for result in results:
-            writer.writerow({
-                "seed": result["seed"],
-                "final_no_control_mse": result["final_no_control_mse"],
-                "final_xor_accuracy": result["final_xor_accuracy"],
-                "threshold_epoch": result["threshold_epoch"],
-                "unstable": result["unstable"],
-                "mean_control_failure_rate": np.mean(result["control_failure_rates"]),
-                "mean_control_magnitude": np.mean(result["control_magnitudes"]),
-            })
+            writer.writerow(
+                {
+                    "seed": result["seed"],
+                    "final_no_control_mse": result["final_no_control_mse"],
+                    "final_xor_accuracy": result["final_xor_accuracy"],
+                    "threshold_epoch": result["threshold_epoch"],
+                    "unstable": result["unstable"],
+                    "mean_control_failure_rate": np.mean(
+                        result["control_failure_rates"]
+                    ),
+                    "mean_control_magnitude": np.mean(result["control_magnitudes"]),
+                }
+            )
 
     print(f"Saved plot to {args.output}")
     print(f"Saved diagnostics plot to {args.diagnostics_output}")

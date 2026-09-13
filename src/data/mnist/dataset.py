@@ -9,6 +9,8 @@ logger = get_logger()
 
 
 class MNISTDataset(Dataset):
+    """MNISTDataset."""
+
     def __init__(
         self,
         root_dir: str = "./data",
@@ -20,6 +22,21 @@ class MNISTDataset(Dataset):
         norm_mean: float = 0.1307,
         norm_std: float = 0.3081,
     ):
+        """Initialize the MNIST dataset wrapper with optional normalization and target encoding.
+
+        Args:
+            root_dir (str): Directory containing the raw MNIST data files.
+            train (bool): Whether to load the training split instead of the test split.
+            flatten (bool): Whether to flatten each 28x28 image into a 784-element vector.
+            num_classes (int): Number of output classes used in the target encoding.
+            target_on (float): Continuous target value assigned to the ground-truth class.
+            target_off (float): Continuous target value assigned to all non-target classes.
+            norm_mean (float): Mean used for input normalization.
+            norm_std (float): Standard deviation used for input normalization.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.train = train
         self.flatten = flatten
@@ -41,13 +58,27 @@ class MNISTDataset(Dataset):
         )
 
     def __len__(self) -> int:
-        """Returns the total number of samples in the dataset."""
+        """Return the total number of samples in the dataset.
+
+        Args:
+            None.
+
+        Returns:
+            int: Number of samples available in the selected split.
+        """
         return len(self.dataset)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Retrieves a single sample and its corresponding continuous target.
         Target learning requires continuous target vectors rather than class indices.
+
+        Args:
+            idx (int): Sample index within the underlying MNIST split.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Flattened/normalized input image and
+                continuous target vector.
         """
         x, y_idx = self.dataset[idx]
 
@@ -80,10 +111,12 @@ def get_dataloader(
 
     Args:
         batch_size (int): Number of samples per batch.
+        root_dir (str): Root directory containing or downloading MNIST data.
         train (bool): Whether to load the training or test split.
         shuffle (Optional[bool]): Whether to shuffle the data. Defaults to True for train, False for test.
         num_workers (int): Number of subprocesses for data loading.
         flatten (bool): Whether to flatten the images to 1D vectors.
+        num_classes (int): Number of classes encoded in the target vectors.
         target_on (float): Continuous target value for the correct class.
         target_off (float): Continuous baseline target value for incorrect classes (prevents dead neurons).
         norm_mean (float): Mean for Z-score normalization.

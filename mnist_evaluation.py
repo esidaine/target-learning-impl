@@ -38,7 +38,15 @@ from utils.utils import set_all_seeds
 def evaluate_test_set(
     network: Network, loader: torch.utils.data.DataLoader
 ) -> dict[str, float]:
-    """Return held-out MSE and classification accuracy for one model."""
+    """Return held-out MSE and classification accuracy for one model.
+
+    Args:
+        network (Network): Model to evaluate.
+        loader (torch.utils.data.DataLoader): Held-out data loader.
+
+    Returns:
+        dict[str, float]: Dictionary with ``test_mse`` and ``test_accuracy``.
+    """
     network.eval()
     total_squared_error = 0.0
     correct = 0
@@ -65,7 +73,18 @@ def run_experiment(
     batch_size: int,
     data_root: Path,
 ) -> dict[str, Any]:
-    """Train one configuration and return epoch-level diagnostics."""
+    """Train one configuration and return epoch-level diagnostics.
+
+    Args:
+        effect (str): Dendritic effect to evaluate.
+        seed (int): Random seed for reproducible initialization and data order.
+        epochs (int): Number of training epochs to run.
+        batch_size (int): Mini-batch size for the training loader.
+        data_root (Path): Root directory containing MNIST data.
+
+    Returns:
+        dict[str, Any]: Per-run metadata and epoch-level metrics.
+    """
     config = ExperimentConfig(
         task="mnist",
         mode="pid",
@@ -205,7 +224,15 @@ def run_experiment(
 
 
 def save_results(results: list[dict[str, Any]], output_dir: Path) -> None:
-    """Write results and plots for later comparison."""
+    """Write evaluation records, tables, and comparison plots.
+
+    Args:
+        results (list[dict[str, Any]]): Experiment records with epoch histories.
+        output_dir (Path): Directory receiving JSON, CSV, and PNG outputs.
+
+    Returns:
+        None.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "mnist_results.json").write_text(
         json.dumps(results, indent=2), encoding="utf-8"
@@ -230,7 +257,15 @@ def save_results(results: list[dict[str, Any]], output_dir: Path) -> None:
 
 
 def plot_learning_curves(results: list[dict[str, Any]], path: Path) -> None:
-    """Plot mean +/- one standard deviation over seeds."""
+    """Plot mean +/- one standard deviation over seeds.
+
+    Args:
+        results (list[dict[str, Any]]): Experiment records grouped by effect and seed.
+        path (Path): Output path for the saved figure.
+
+    Returns:
+        None.
+    """
     effects = sorted({run["effect"] for run in results})
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
     metrics = [
@@ -263,7 +298,15 @@ def plot_learning_curves(results: list[dict[str, Any]], path: Path) -> None:
 
 
 def plot_final_accuracy(results: list[dict[str, Any]], path: Path) -> None:
-    """Plot final held-out accuracy for each seed and effect."""
+    """Plot final held-out accuracy for each seed and effect.
+
+    Args:
+        results (list[dict[str, Any]]): Experiment records grouped by effect and seed.
+        path (Path): Output path for the saved figure.
+
+    Returns:
+        None.
+    """
     effects = sorted({run["effect"] for run in results})
     fig, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
     positions = torch.arange(len(effects), dtype=torch.float64).numpy()
@@ -301,7 +344,15 @@ def plot_final_accuracy(results: list[dict[str, Any]], path: Path) -> None:
 
 
 def plot_diagnostics(results: list[dict[str, Any]], output_dir: Path) -> None:
-    """Plot weight growth and controller behavior over training."""
+    """Plot weight growth and controller behavior over training.
+
+    Args:
+        results (list[dict[str, Any]]): Experiment records grouped by effect and seed.
+        output_dir (Path): Directory receiving generated diagnostic plots.
+
+    Returns:
+        None.
+    """
     effects = sorted({run["effect"] for run in results})
     metrics = [
         (
@@ -372,7 +423,15 @@ def plot_diagnostics(results: list[dict[str, Any]], output_dir: Path) -> None:
 
 
 def plot_layer_diagnostics(results: list[dict[str, Any]], path: Path) -> None:
-    """Plot per-layer diagnostics and output error before/after control."""
+    """Plot per-layer diagnostics and output error before/after control.
+
+    Args:
+        results (list[dict[str, Any]]): Experiment records grouped by effect and seed.
+        path (Path): Output path for the saved figure.
+
+    Returns:
+        None.
+    """
     effects = sorted({run["effect"] for run in results})
     layer_count = len(results[0]["history"][0]["layer_weight_norms"])
     fig, axes = plt.subplots(2, 3, figsize=(16, 8), constrained_layout=True)
@@ -436,16 +495,17 @@ def plot_layer_diagnostics(results: list[dict[str, Any]], path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    """parse_args.
+    """Parse command-line options for the MNIST evaluation script.
 
     Args:
+        None.
 
     Returns:
-        argparse.Namespace:
+        argparse.Namespace: Parsed evaluation and output configuration.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--seeds", type=int, nargs="+", default=[7, 42])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[42])
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--data-root", type=Path, default=ROOT / "data")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "mnist_evaluation")
@@ -453,12 +513,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """main.
+    """Run additive and multiplicative MNIST evaluations for each seed.
 
     Args:
+        None.
 
     Returns:
-        None:
+        None.
     """
     args = parse_args()
     results = [

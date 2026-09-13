@@ -6,8 +6,11 @@ from _helpers import _prime_and_forward, _autograd_grads, _cosine_sims
 from utils.utils import set_all_seeds
 from models.network import Network
 
+
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-def test_chain_rule_matches_autograd_exactly(tiny_network, tiny_batch, dendritic_effect):
+def test_chain_rule_matches_autograd_exactly(
+    tiny_network, tiny_batch, dendritic_effect
+):
     """
     Mathematical claim: chain_rule_project_feedback is exact backpropagation.
 
@@ -19,6 +22,14 @@ def test_chain_rule_matches_autograd_exactly(tiny_network, tiny_batch, dendritic
     Expected: cosine similarity > 0.999 on every layer (floating-point exact).
     A lower value indicates a bug in either the SiLU derivative or the
     chain-rule loop.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        dendritic_effect (str): Dendritic effect under test.
+
+    Returns:
+        None.
     """
     torch.manual_seed(42)
     x, _ = tiny_batch
@@ -44,7 +55,9 @@ def test_chain_rule_matches_autograd_exactly(tiny_network, tiny_batch, dendritic
 
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-def test_dfc_feedback_positively_aligned_with_gradient(tiny_network, tiny_batch, dendritic_effect):
+def test_dfc_feedback_positively_aligned_with_gradient(
+    tiny_network, tiny_batch, dendritic_effect
+):
     """
     Theoretical claim: DFC with Q initialised to J^T is gradient-aligned.
 
@@ -55,6 +68,14 @@ def test_dfc_feedback_positively_aligned_with_gradient(tiny_network, tiny_batch,
     for DFC to act as a useful learning signal.
 
     A failure here points to a bug in the Q initialisation block of Network.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        dendritic_effect (str): Dendritic effect under test.
+
+    Returns:
+        None.
     """
     torch.manual_seed(42)
     x, _ = tiny_batch
@@ -82,7 +103,9 @@ def test_dfc_feedback_positively_aligned_with_gradient(tiny_network, tiny_batch,
 
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-def test_dfc_derivative_flag_improves_gradient_alignment(tiny_network, tiny_batch, dendritic_effect):
+def test_dfc_derivative_flag_improves_gradient_alignment(
+    tiny_network, tiny_batch, dendritic_effect
+):
     """
     Ablation hypothesis: use_derivative=True brings DFC closer to the true
     gradient by recovering the local f'(z_i) factor that pure DFC omits.
@@ -97,6 +120,14 @@ def test_dfc_derivative_flag_improves_gradient_alignment(tiny_network, tiny_batc
       2. The derivative flag improves alignment on a strict majority of seeds
          (>= 4 out of 5), allowing for one adversarial seed where the SiLU
          negative-derivative tail dominates.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        dendritic_effect (str): Dendritic effect under test.
+
+    Returns:
+        None.
     """
     seeds = [1, 2, 3, 7, 42]
     records = []  # (seed, mean_no_deriv, mean_with_deriv, sims_no, sims_with)
@@ -110,22 +141,22 @@ def test_dfc_derivative_flag_improves_gradient_alignment(tiny_network, tiny_batc
         u = torch.randn_like(y)
 
         # Both calls read pop.z; must happen before backward() releases the graph
-        dfc_no_deriv   = tiny_network.DFC_project_feedback(u, use_derivative=False)
+        dfc_no_deriv = tiny_network.DFC_project_feedback(u, use_derivative=False)
         dfc_with_deriv = tiny_network.DFC_project_feedback(u, use_derivative=True)
         autograd_grads = _autograd_grads(tiny_network, y, u)
 
-        sims_no   = _cosine_sims(dfc_no_deriv,   autograd_grads)
+        sims_no = _cosine_sims(dfc_no_deriv, autograd_grads)
         sims_with = _cosine_sims(dfc_with_deriv, autograd_grads)
 
-        mean_no   = sum(sims_no)   / len(sims_no)
+        mean_no = sum(sims_no) / len(sims_no)
         mean_with = sum(sims_with) / len(sims_with)
 
         records.append((seed, mean_no, mean_with, sims_no, sims_with))
 
     # ── Aggregate ──────────────────────────────────────────────────────────
-    overall_mean_no   = sum(r[1] for r in records) / len(records)
+    overall_mean_no = sum(r[1] for r in records) / len(records)
     overall_mean_with = sum(r[2] for r in records) / len(records)
-    n_seeds_improved  = sum(1 for r in records if r[2] > r[1])
+    n_seeds_improved = sum(1 for r in records if r[2] > r[1])
 
     # ── Assertions ─────────────────────────────────────────────────────────
     assert overall_mean_with > overall_mean_no, (
@@ -145,32 +176,61 @@ def test_dfc_derivative_flag_improves_gradient_alignment(tiny_network, tiny_batc
     )
 
     # ── Diagnostic print (visible with pytest -s) ──────────────────────────
-    print(f"\n[PASSED] derivative flag alignment improvement "
-          f"[dendritic_effect='{dendritic_effect}']")
-    print(f"  {'seed':<6} {'no_deriv':>10} {'with_deriv':>12} {'delta':>8}  per-layer-delta")
+    print(
+        f"\n[PASSED] derivative flag alignment improvement "
+        f"[dendritic_effect='{dendritic_effect}']"
+    )
+    print(
+        f"  {'seed':<6} {'no_deriv':>10} {'with_deriv':>12} {'delta':>8}  per-layer-delta"
+    )
     for seed, mean_no, mean_with, sims_no, sims_with in records:
         delta = mean_with - mean_no
         layer_deltas = [f"{w-n:+.4f}" for w, n in zip(sims_with, sims_no)]
         improved = "✓" if mean_with > mean_no else "✗"
-        print(f"  {seed:<6} {mean_no:>10.4f} {mean_with:>12.4f} {delta:>+8.4f}  {layer_deltas}  {improved}")
-    print(f"  {'overall':<6} {overall_mean_no:>10.4f} {overall_mean_with:>12.4f} "
-          f"{overall_mean_with - overall_mean_no:>+8.4f}  "
-          f"({n_seeds_improved}/{len(seeds)} seeds improved)")
+        print(
+            f"  {seed:<6} {mean_no:>10.4f} {mean_with:>12.4f} {delta:>+8.4f}  {layer_deltas}  {improved}"
+        )
+    print(
+        f"  {'overall':<6} {overall_mean_no:>10.4f} {overall_mean_with:>12.4f} "
+        f"{overall_mean_with - overall_mean_no:>+8.4f}  "
+        f"({n_seeds_improved}/{len(seeds)} seeds improved)"
+    )
+
 
 def test_invalid_mode_raises(tiny_network, tiny_batch):
-    """Edge case check: Verifies validation code raises error on garbage strings."""
+    """Verify validation raises when the controller mode is unsupported.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+
+    Returns:
+        None.
+    """
     x, y = tiny_batch
-    controller = ControlMechanism(mode='nonsense')
+    controller = ControlMechanism(mode="nonsense")
     with pytest.raises(ValueError):
         controller.optimize_control_signal(x, y, tiny_network)
+
 
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_weights_stay_unchanged(tiny_network, tiny_batch, mode, dendritic_effect):
+    """Ensure control optimization does not directly mutate forward weights.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        mode (str): Controller mode under test.
+        dendritic_effect (str): Dendritic effect under test.
+
+    Returns:
+        None.
+    """
     for pop in tiny_network.populations:
         pop.dendritic_effect = dendritic_effect
 
-    x, y = tiny_batch 
+    x, y = tiny_batch
     controller = ControlMechanism(mode=mode, max_steps=5)
 
     weights_before = [pop.W.weight.detach().clone() for pop in tiny_network.populations]
@@ -178,11 +238,23 @@ def test_weights_stay_unchanged(tiny_network, tiny_batch, mode, dendritic_effect
     weights_after = [pop.W.weight for pop in tiny_network.populations]
 
     for i, (W_before, W_after) in enumerate(zip(weights_before, weights_after)):
-        assert torch.equal(W_before, W_after), (
-            f"[{mode}] Layer {i} weights changed during control optimization."
-        )
+        assert torch.equal(
+            W_before, W_after
+        ), f"[{mode}] Layer {i} weights changed during control optimization."
+
+
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
-def test_initialized_controls_shape_and_magnitude(tiny_network, tiny_batch, mode): 
+def test_initialized_controls_shape_and_magnitude(tiny_network, tiny_batch, mode):
+    """Check that optimized controls preserve expected per-layer shapes.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        mode (str): Controller mode under test.
+
+    Returns:
+        None.
+    """
     x, y = tiny_batch
     controller = ControlMechanism(mode=mode, max_steps=5)
     expected = controller.initialize_controls(x.size(0), tiny_network.populations)
@@ -191,17 +263,43 @@ def test_initialized_controls_shape_and_magnitude(tiny_network, tiny_batch, mode
     for actual, exp in zip(c_star, expected):
         assert actual.shape == exp.shape
 
+
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
-def test_controls_have_false_required_grad(tiny_network, tiny_batch, mode): 
+def test_controls_have_false_required_grad(tiny_network, tiny_batch, mode):
+    """Verify returned control signals are detached from autograd.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        mode (str): Controller mode under test.
+
+    Returns:
+        None.
+    """
     x, y = tiny_batch
     controller = ControlMechanism(mode=mode, max_steps=5)
     c_star, _ = controller.optimize_control_signal(x, y, tiny_network)
     for c in c_star:
         assert not c.requires_grad, "Control signals should not require gradients."
 
+
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-def test_early_exit_at_convergence(tiny_network, tiny_batch, mode, dendritic_effect, huge_tolerance = 1000): 
+def test_early_exit_at_convergence(
+    tiny_network, tiny_batch, mode, dendritic_effect, huge_tolerance=1000
+):
+    """Verify early convergence exits safely and preserves required state.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        mode (str): Controller mode under test.
+        dendritic_effect (str): Dendritic effect under test.
+        huge_tolerance (float): Tolerance value that forces immediate convergence.
+
+    Returns:
+        None.
+    """
     controller = controller = ControlMechanism(mode=mode)
     for pop in tiny_network.populations:
         pop.dendritic_effect = dendritic_effect
@@ -211,7 +309,7 @@ def test_early_exit_at_convergence(tiny_network, tiny_batch, mode, dendritic_eff
 
     with torch.no_grad():
         y_baseline = tiny_network(x, control_signals=None, save_baseline=False)
-    
+
     c_star, _ = controller.optimize_control_signal(x, y, tiny_network)
 
     # 1. No PID step actually executed → returned controls are still zeros.
@@ -232,9 +330,10 @@ def test_early_exit_at_convergence(tiny_network, tiny_batch, mode, dendritic_eff
     # 3. With zero control signals, the controlled output should equal baseline.
     with torch.no_grad():
         y_controlled = tiny_network(x, control_signals=c_star, save_baseline=False)
-    assert torch.allclose(y_controlled, y_baseline, atol=1e-6), (
-        "With zero c_star, controlled output should match the no-control baseline."
-    )
+    assert torch.allclose(
+        y_controlled, y_baseline, atol=1e-6
+    ), "With zero c_star, controlled output should match the no-control baseline."
+
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 @pytest.mark.parametrize(
@@ -248,20 +347,29 @@ def test_early_exit_at_convergence(tiny_network, tiny_batch, mode, dendritic_eff
     ids=["backprop", "pid"],
 )
 def test_convergence_reduces_loss(
-    tiny_network, tiny_batch, dendritic_effect, mode, max_steps, min_relative_improvement
+    tiny_network,
+    tiny_batch,
+    dendritic_effect,
+    mode,
+    max_steps,
+    min_relative_improvement,
 ):
-    """
-    The control optimiser should drive the network output toward the target.
+    """Verify that the control optimizer reduces output loss for both optimization modes.
 
-    Both modes must:
-      1. Take at least one optimization step.
-      2. Reduce the loss below its baseline value.
-      3. Achieve a mode-specific minimum relative improvement.
+    The test checks that each optimization run takes at least one step, records a
+    meaningful improvement over the baseline loss, and meets a mode-specific minimum
+    relative improvement threshold.
 
-    Backprop uses autograd through the forward weights and should converge
-    fast.  PID uses DFC's `Q_i u` feedback (Meulemans 2021) with random
-    feedback matrices, which is gradient-aligned only in expectation, so
-    we require a smaller improvement and grant more steps.
+    Args:
+        tiny_network (Network): The small network fixture used to evaluate control.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): Input batch and target output.
+        dendritic_effect (str): Dendritic modulation rule being exercised.
+        mode (str): Controller mode under test, either "backprop" or "pid".
+        max_steps (int): Maximum number of optimization steps allowed in the run.
+        min_relative_improvement (float): Minimum relative loss reduction required.
+
+    Returns:
+        None.
     """
     for pop in tiny_network.populations:
         pop.dendritic_effect = dendritic_effect
@@ -274,7 +382,9 @@ def test_convergence_reduces_loss(
     assert metrics.initial_loss is not None, "initial_loss never recorded"
     assert metrics.final_loss is not None, "final_loss never recorded"
     assert metrics.steps_taken > 0, "optimizer never took a step"
-    assert len(metrics.loss_history) >= 2, "loss_history should contain at least baseline + one update"
+    assert (
+        len(metrics.loss_history) >= 2
+    ), "loss_history should contain at least baseline + one update"
 
     # ---- Main behavioural check -----------------------------------------
     history = metrics.loss_history
@@ -282,12 +392,15 @@ def test_convergence_reduces_loss(
     if mode == "backprop":
         monotone = all(b <= a + 1e-9 for a, b in zip(history, history[1:]))
         assert monotone, _failure_report(
-            mode, metrics, reason="Backprop loss history is not monotonically decreasing"
+            mode,
+            metrics,
+            reason="Backprop loss history is not monotonically decreasing",
         )
 
     rel_improvement = metrics.improvement / metrics.initial_loss
     assert rel_improvement >= min_relative_improvement, _failure_report(
-        mode, metrics,
+        mode,
+        metrics,
         reason=(
             f"improvement {rel_improvement*100:.2f}% "
             f"< required {min_relative_improvement*100:.2f}%"
@@ -296,7 +409,16 @@ def test_convergence_reduces_loss(
 
 
 def _failure_report(mode: str, metrics, reason: str) -> str:
-    """Verbose error message """
+    """Build a detailed failure report for convergence tests.
+
+    Args:
+        mode (str): Controller mode used in the failing run.
+        metrics (OptimizationMetrics): Captured optimization diagnostics.
+        reason (str): Human-readable explanation of the failed expectation.
+
+    Returns:
+        str: Multi-line report summarizing losses and loss-history behavior.
+    """
     history = metrics.loss_history
     first = history[:5]
     last = history[-5:]
@@ -313,8 +435,18 @@ def _failure_report(mode: str, metrics, reason: str) -> str:
         f"  history[-5:] : {[f'{v:.4f}' for v in last]}"
     )
 
+
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
+    """Check that PID control does not diverge across multiple random seeds.
+
+    Args:
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        dendritic_effect (str): Dendritic effect under test.
+
+    Returns:
+        None.
+    """
     x, y = tiny_batch
     diverged_seeds = []
 
@@ -323,8 +455,8 @@ def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
         net = Network(pop_sizes=[2, 4, 1])
         for pop in net.populations:
             pop.dendritic_effect = dendritic_effect
-            
-        controller = ControlMechanism(mode='pid', max_steps=100)
+
+        controller = ControlMechanism(mode="pid", max_steps=100)
         _, metrics = controller.optimize_control_signal(x, y, net)
 
         history = metrics.loss_history
@@ -333,18 +465,6 @@ def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
         if increases / total_steps > 0.6:
             diverged_seeds.append(seed)
 
-    assert not diverged_seeds, (
-        f"[{dendritic_effect}] PID diverged on seeds: {diverged_seeds}"
-    )
-
-
-
-
-    
-
-
-
-
-
-
-
+    assert (
+        not diverged_seeds
+    ), f"[{dendritic_effect}] PID diverged on seeds: {diverged_seeds}"

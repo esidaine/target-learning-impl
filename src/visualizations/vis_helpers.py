@@ -11,6 +11,17 @@ def make_manim_snapshot(network: Any, local_controls: list[Any], metrics: Any) -
     The controller calls this once per PID step. Keeping snapshots as NumPy
     arrays makes them independent of autograd and safe to serialize with
     ``pickle`` after training.
+
+    Args:
+        network (Any): Network object containing populations with controlled activations.
+        local_controls (list[Any]): Per-layer local controls for the current step.
+        metrics (Any): Metrics object that stores state-history snapshots.
+
+    Returns:
+        None.
+
+    Raises:
+        RuntimeError: If controlled activations are unavailable when called.
     """
     del local_controls
 

@@ -3,10 +3,18 @@ from core.controllers import ControlMechanism
 from core.plasticity import Plasticity
 from core.trainer import Trainer
 
+
 def test_repolarize_clears_physical_state(tiny_network, tiny_batch):
     """
-    Ensures that when a new batch arrives (save_baseline=True), all physical state 
+    Ensures that when a new batch arrives (save_baseline=True), all physical state
     from the previous batch's control phase is completely wiped, preventing state bleeding.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+
+    Returns:
+        None.
     """
     x, _ = tiny_batch
 
@@ -15,11 +23,13 @@ def test_repolarize_clears_physical_state(tiny_network, tiny_batch):
         for pop in tiny_network.populations
     ]
 
-    # 1. Simulate first batch 
+    # 1. Simulate first batch
     # Baseline pass to initialize a_baseline and a_controlled for the first batch
     tiny_network(x, control_signals=None, save_baseline=True)
     # Control signals pass to update a_controlled for the first batch
-    tiny_network(x, control_signals=dummy_controls, save_baseline=False, dynamic_step=True)
+    tiny_network(
+        x, control_signals=dummy_controls, save_baseline=False, dynamic_step=True
+    )
 
     # 2. Simulate the arrival of Batch 2 (save_baseline=True triggers repolarize)
     tiny_network(x, control_signals=None, save_baseline=True)
@@ -34,13 +44,20 @@ def test_repolarize_clears_physical_state(tiny_network, tiny_batch):
 
 def test_no_computational_graph_leakage(tiny_network, tiny_batch):
     """
-    Ensures that the custom Target Learning manual weight updates do not accidentally 
+    Ensures that the custom Target Learning manual weight updates do not accidentally
     accumulate PyTorch Autograd gradients, which would cause memory leaks over epochs.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+
+    Returns:
+        None.
     """
-    controller = ControlMechanism(mode='backprop', max_steps=5)
+    controller = ControlMechanism(mode="backprop", max_steps=5)
     plasticity = Plasticity(lr_w=0.5)
     trainer = Trainer(tiny_network, controller, plasticity)
-    
+
     x, _ = tiny_batch
     out_dim = tiny_network.populations[-1].num_neurons
     random_target = torch.randn(x.size(0), out_dim)
@@ -60,10 +77,12 @@ def test_no_computational_graph_leakage(tiny_network, tiny_batch):
     for i, pop in enumerate(tiny_network.populations):
         # We only check if they exist (they might be None)
         if pop.a_baseline is not None:
-            assert not pop.a_baseline.requires_grad, f"Layer {i} a_baseline requires grad."
-            
+            assert (
+                not pop.a_baseline.requires_grad
+            ), f"Layer {i} a_baseline requires grad."
+
         # In 'backprop' mode, a_controlled might temporarily require grad during optimization,
-        # but once optimization is done and we move on, it shouldn't be holding a graph 
+        # but once optimization is done and we move on, it shouldn't be holding a graph
         # that affects the parameters. Since your clean-up loops detach a_controlled:
         if pop.a_controlled is not None:
             assert not pop.a_controlled.requires_grad, (

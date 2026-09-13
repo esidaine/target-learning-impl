@@ -10,8 +10,10 @@ import numpy as np
 
 logger = get_logger()
 
+
 @dataclass
 class OptimizationMetrics:
+
     initial_loss: Optional[float] = None
     final_loss: Optional[float] = None
     steps_taken: int = 0
@@ -24,38 +26,108 @@ class OptimizationMetrics:
 
     # ---- write API ---------------------------------------------------
     def record(self, loss: float) -> None:
-        """Log a loss measurement; first call sets initial_loss."""
+        """Log a loss measurement; first call sets ``initial_loss``.
+
+        Args:
+            loss (float): Loss value to append to the optimization history.
+
+        Returns:
+            None.
+        """
         if self.initial_loss is None:
             self.initial_loss = loss
         self.final_loss = loss
         self.loss_history.append(loss)
-    
+
     def step(self) -> None:
+        """Advance the optimizer bookkeeping by one optimization step.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         self.steps_taken += 1
 
     def mark_converged(self) -> None:
+        """Mark the optimization run as having reached the convergence threshold.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         self.converged = True
 
     # ---- read API ----------------------------------------------------
     @property
     def improvement(self) -> float:
+        """Return the reduction in loss achieved during the optimization run.
+
+        Args:
+            None.
+
+        Returns:
+            float: The decrease from the initial loss to the final loss, or 0.0 when
+                no baseline and final losses have been recorded yet.
+        """
         if self.initial_loss is None or self.final_loss is None:
             return 0.0
         return self.initial_loss - self.final_loss
 
     @property
     def improved(self) -> bool:
+        """Return whether the optimization run reduced the loss.
+
+        Args:
+            None.
+
+        Returns:
+            bool: True when the final loss is lower than the initial loss.
+        """
         return self.improvement > 0
 
 
-class ControlMechanism: 
+class ControlMechanism:
     """
     Generates the control signal (c_n) (per neuron) and finds the optimal control signal (c_n*) that allows the neuron to converge to the target firing rate (a_target).
-    Has two implementations: with backpropagation and with PID control 
+    Has two implementations: with backpropagation and with PID control
     """
-    def __init__(self, mode='backprop', lr_c=0.1, momentum=0.5, max_steps=100, 
-             dt=0.1, tau=1.0, alpha=0.01, k_p=0.8, use_derivative=True,
-             feedback_mode="dfc"):
+
+    def __init__(
+        self,
+        mode="backprop",
+        lr_c=0.1,
+        momentum=0.5,
+        max_steps=100,
+        dt=0.1,
+        tau=1.0,
+        alpha=0.01,
+        k_p=0.8,
+        use_derivative=True,
+        feedback_mode="dfc",
+    ):
+        """Initialize the controller configuration for either backprop or PID optimization.
+
+        Args:
+            mode (str): Optimization mode to use. Supported values are "backprop" and
+                "pid".
+            lr_c (float): Learning rate for the control signal in backprop mode.
+            momentum (float): Momentum coefficient used by the control optimizer.
+            max_steps (int): Maximum number of optimization iterations allowed.
+            dt (float): Time-step size for the PID integrator.
+            tau (float): Time constant controlling the settling dynamics.
+            alpha (float): Leak coefficient used by the control integrator.
+            k_p (float): Proportional gain applied to the control error.
+            use_derivative (bool): Whether the DFC projection includes the activation
+                derivative term.
+            feedback_mode (str): Feedback assignment mode. Must be "dfc" or "chain".
+
+        Returns:
+            None.
+        """
         self.mode = mode
         self.lr_c = lr_c
         self.momentum = momentum
@@ -71,47 +143,67 @@ class ControlMechanism:
         self.feedback_mode = feedback_mode
 
     def initialize_controls(self, batch_size, neuron_populations):
+        """Create zero-initialized local control tensors for each population.
+
+        Args:
+            batch_size (int): Number of samples represented by each control tensor.
+            neuron_populations (Iterable[NeuralPopulation]): Populations to control.
+
+        Returns:
+            list[torch.Tensor]: One trainable control tensor per population.
         """
-        Creates the tunable 'c_n' tensors, one for each hidden layer/ group of neurons, stored in a list.
-        """
-        control_signals = [] 
-        
+        control_signals = []
+
         for pop in neuron_populations:
             c_n = torch.zeros(
-                (batch_size, pop.num_neurons), 
-                device=pop.W.weight.device, 
-                requires_grad=True
+                (batch_size, pop.num_neurons),
+                device=pop.W.weight.device,
+                requires_grad=True,
             )
-            
-            control_signals.append(c_n) 
-            
+
+            control_signals.append(c_n)
+
         return control_signals
 
     def optimize_control_signal(self, sensory_inputs, target_y, network):
-        """
-        Finds the optimal c_n* using the selected mode.
+        """Find local control signals that reduce the network output error.
+
+        Args:
+            sensory_inputs (torch.Tensor): Input batch passed through the network.
+            target_y (torch.Tensor): Desired output for each input sample.
+            network (Network): Network whose control signals are optimized.
+
+        Returns:
+            tuple[list[torch.Tensor], OptimizationMetrics]: Optimized controls and
+                diagnostics collected during optimization.
+
+        Raises:
+            ValueError: If the configured optimization mode is unsupported.
         """
 
         # Initialize c_n to zeros (neutral dendritic input)
-        batch_size = sensory_inputs.size(0) # sensory_inputs is a tensor of shape [batch_size, number of features per data point]
+        batch_size = sensory_inputs.size(
+            0
+        )  # sensory_inputs is a tensor of shape [batch_size, number of features per data point]
         metrics = OptimizationMetrics()
 
         # ==========================================
         # STEP 1: THE BASELINE PASS
         # ==========================================
 
-        # Turn on evaluation mode (important when we have dropout or batchnorm layers, 
+        # Turn on evaluation mode (important when we have dropout or batchnorm layers,
         # which we don't in this simple model, but good practice for future extensions)
-        network.eval() 
+        network.eval()
 
         # Data goes in, flows through the frozen W, and makes a prediction.
         # We use torch.no_grad() because the baseline guess requires no optimization.
         # This prevents PyTorch from building a useless computational graph.
         with torch.no_grad():
-            baseline_pred = network(sensory_inputs, control_signals=None, save_baseline=True)
+            baseline_pred = network(
+                sensory_inputs, control_signals=None, save_baseline=True
+            )
 
         metrics.record(F.mse_loss(baseline_pred, target_y).item())
-
 
         # ==========================================
         # STEP 2: INITIALIZE CONTROLS TO BE TUNED
@@ -119,26 +211,31 @@ class ControlMechanism:
         # Create the list of c_n tensors that will be tuned and where gradients will be tracked.
         # Each batch of sensory inputs will have its own control signal for each population (first hidden layer, second hidden layer, etc.)
         initial_controls = self.initialize_controls(batch_size, network.populations)
-    
+
         # ==========================================
         # STEP 3: THE OPTIMIZATION PHASE
         # ==========================================
-        
-        # Turn on training mode (important for dropout or batchnorm layers, 
+
+        # Turn on training mode (important for dropout or batchnorm layers,
         # which we don't have, but good practice for future extensions)
         network.train()
 
-        if self.mode == 'backprop':
+        if self.mode == "backprop":
             optimized_controls = self._optimize_via_backprop(
                 initial_controls, sensory_inputs, target_y, network, metrics
-                )
-        elif self.mode == 'pid':
+            )
+        elif self.mode == "pid":
             optimized_controls = self._optimize_via_pid(
-                initial_controls, sensory_inputs, target_y, network, baseline_pred, metrics, self.use_derivative
+                initial_controls,
+                sensory_inputs,
+                target_y,
+                network,
+                baseline_pred,
+                metrics,
+                self.use_derivative,
             )
         else:
             raise ValueError("Mode must be 'backprop' or 'pid'")
-        
 
         if not metrics.improved:
             logger.warning(
@@ -147,24 +244,42 @@ class ControlMechanism:
                 f"in {metrics.steps_taken} steps"
             )
 
-        
         return optimized_controls, metrics
-        
-    def _optimize_via_backprop(self, control_signals, sensory_inputs, target_y, network, metrics):
-        
-        c_optimizer = torch.optim.SGD(control_signals, lr=self.lr_c, momentum=self.momentum)
+
+    def _optimize_via_backprop(
+        self, control_signals, sensory_inputs, target_y, network, metrics
+    ):
+        """Optimize the control signals by backpropagating the output error to each local control.
+
+        Args:
+            control_signals (list[torch.Tensor]): Per-layer control tensors whose values
+                are adjusted during optimization.
+            sensory_inputs (torch.Tensor): Input batch fed to the network.
+            target_y (torch.Tensor): Target outputs the model is trained to match.
+            network (Network): Network instance whose forward pass is being optimized.
+            metrics (OptimizationMetrics): Running metrics object for the optimization.
+
+        Returns:
+            list[torch.Tensor]: Detached control tensors after optimization.
+        """
+
+        c_optimizer = torch.optim.SGD(
+            control_signals, lr=self.lr_c, momentum=self.momentum
+        )
 
         # Loss function (Mean Squared Error denotes averaging over the errors f(x) - y squared (per data point) across the batch)
         criterion = nn.MSELoss()
-        
+
         for _ in range(self.max_steps):
 
             # 1. Zero the gradients for c_n
             c_optimizer.zero_grad()
-            
+
             # 2. Forward pass with the current control signals (note that this is the second pass, since the baseline pass has c_n = 0)
             # This builds the computational graph connecting c_n to the output
-            y_pred = network(sensory_inputs, control_signals=control_signals, save_baseline=False)
+            y_pred = network(
+                sensory_inputs, control_signals=control_signals, save_baseline=False
+            )
 
             # 3. Calculate how far off we are from the target
             loss = criterion(y_pred, target_y)
@@ -176,17 +291,19 @@ class ControlMechanism:
             # 4. Backpropagate the error to calculate gradients with respect to c_n
             # Note that we multiply the output error by the transpose of the weights (W.T) - weight symmetry!
             loss.backward()
-            
+
             # 5. Take a step to update c_n
             c_optimizer.step()
             metrics.step()
-        
+
             # 6. Record the new loss after this step
             with torch.no_grad():
-                post_step_pred = network(sensory_inputs, control_signals=control_signals, save_baseline=False)
+                post_step_pred = network(
+                    sensory_inputs, control_signals=control_signals, save_baseline=False
+                )
                 metrics.record(criterion(post_step_pred, target_y).item())
 
-        # Clean up memory 
+        # Clean up memory
         for pop in network.populations:
             if pop.a_controlled is not None:
                 pop.a_controlled = pop.a_controlled.detach()
@@ -194,28 +311,47 @@ class ControlMechanism:
         # Return the optimized control signals (c*)
         # We detach them because we are done optimizing them and don't want to carry the computational graph forward.
         return [c_n.detach() for c_n in control_signals]
-       
-    @torch.no_grad() # Turn off PyTorch autograd for PID. That means we won't use W.T for the feedback
-    def _optimize_via_pid(self, control_signals, sensory_inputs, target_y, network, baseline_pred, metrics, use_derivative):
-        """
-        The controller pushes, the neurons move, the controller checks the new output, 
-        and pushes again. This happens continuously over your max_steps loop. 
-        It is a dynamical system settling into an equilibrium.
-        The controller knows the global error. This is multiplied by the feedback weights,
-        shattering the global error into thousands of specific, localized control signals (cn​),
-        to every single hidden neuron simultaneously.
-        The hidden neurons have no idea what the global error is, but they do know their own control signal/ apical signal. 
-    
-        """
-        manim_snapshot = False # Set to True to enable Manim snapshots during PID optimization 
 
-        control_stepper = ControlErrorIntegrator(dt=self.dt, tau=self.tau, alpha=self.alpha, k_p=self.k_p)
+    @torch.no_grad()  # Turn off PyTorch autograd for PID. That means we won't use W.T for the feedback
+    def _optimize_via_pid(
+        self,
+        control_signals,
+        sensory_inputs,
+        target_y,
+        network,
+        baseline_pred,
+        metrics,
+        use_derivative,
+    ):
+        """Optimize controls by iteratively settling the network toward its target.
 
-        # Track the global error of the output layer 
+        Args:
+            control_signals (list[torch.Tensor]): Initial local control tensors.
+            sensory_inputs (torch.Tensor): Input batch used by the network.
+            target_y (torch.Tensor): Desired output for the batch.
+            network (Network): Network being driven by feedback control.
+            baseline_pred (torch.Tensor): Output from the control-free baseline pass.
+            metrics (OptimizationMetrics): Object receiving optimization diagnostics.
+            use_derivative (bool): Whether to include local activation derivatives.
+
+        Returns:
+            list[torch.Tensor]: Detached local controls after settling.
+        """
+        manim_snapshot = (
+            False  # Set to True to enable Manim snapshots during PID optimization
+        )
+
+        control_stepper = ControlErrorIntegrator(
+            dt=self.dt, tau=self.tau, alpha=self.alpha, k_p=self.k_p
+        )
+
+        # Track the global error of the output layer
         batch_size = sensory_inputs.size(0)
         output_size = target_y.size(1)
 
-        global_control_integral = torch.zeros(batch_size, output_size, device=sensory_inputs.device)
+        global_control_integral = torch.zeros(
+            batch_size, output_size, device=sensory_inputs.device
+        )
 
         # Initialize y_pred with the control-free baseline measurement we already took
         # shape [batch_size, num_output_neurons]
@@ -223,11 +359,13 @@ class ControlMechanism:
 
         # control signals were created with required_grad=True, so detach for safety
         local_controls = [c.detach() for c in control_signals]
-        
-        # Initialize the global control signal to zeros (shape [batch_size, num_output_neurons])
-        global_control = torch.zeros(batch_size, output_size, device=sensory_inputs.device)
 
-        # Dynamic inversion: 
+        # Initialize the global control signal to zeros (shape [batch_size, num_output_neurons])
+        global_control = torch.zeros(
+            batch_size, output_size, device=sensory_inputs.device
+        )
+
+        # Dynamic inversion:
         # Finding the ideal activation state for each neuron to match the final output target
         # It finds this state incrementally by nudging the control signal over time until the physical simulation settles
         for _ in range(self.max_steps):
@@ -238,18 +376,24 @@ class ControlMechanism:
                 metrics.mark_converged()
                 if metrics.steps_taken == 0:
                     # Ensure a_controlled is initialized for downstream consumers.
-                    network(sensory_inputs, control_signals=local_controls,
-                            save_baseline=False, dynamic_step=True)
+                    network(
+                        sensory_inputs,
+                        control_signals=local_controls,
+                        save_baseline=False,
+                        dynamic_step=True,
+                    )
                 break
-            
+
             # ==========================================
             # UPDATE GLOBAL CONTROL SIGNAL, STEP IN TIME
             # ==========================================
             output_error = target_y - y_pred
-            global_control_integral, global_control = control_stepper.step(global_control_integral, output_error) 
+            global_control_integral, global_control = control_stepper.step(
+                global_control_integral, output_error
+            )
 
             # ==========================================
-            # CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD 
+            # CREDIT ASSIGNMENT, PASS THE GLOBAL CONTROL BACKWARD
             # ==========================================
             if self.feedback_mode == "chain":
                 local_controls = network.chain_rule_project_feedback(global_control)
@@ -259,9 +403,14 @@ class ControlMechanism:
                 )
 
             # ==========================================
-            # SIMULATE A FORWARD PASS 
+            # SIMULATE A FORWARD PASS
             # ==========================================
-            y_pred = network(sensory_inputs, control_signals=local_controls, save_baseline=False, dynamic_step=True)
+            y_pred = network(
+                sensory_inputs,
+                control_signals=local_controls,
+                save_baseline=False,
+                dynamic_step=True,
+            )
             metrics.step()
 
             # ==========================================
@@ -272,17 +421,10 @@ class ControlMechanism:
             # ==========================================
             #  SNAPSHOTTING HOOK FOR VISUALIZATION
             # ==========================================
-     
+
             if manim_snapshot:
                 make_manim_snapshot(network, local_controls, metrics)
 
         metrics.final_control = global_control  # save last u for diagnostics
 
         return local_controls
-   
-
-        
-
-
-
-

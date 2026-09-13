@@ -1,5 +1,5 @@
 from _helpers import _diagnose_layerwise_mismatches
-import torch 
+import torch
 import torch.nn.functional as F
 import pytest
 import copy
@@ -14,9 +14,19 @@ from dataclasses import asdict
 from models.network import NeuralPopulation
 import torch.nn as nn
 
+
 @pytest.mark.parametrize("mode", ["backprop", "pid"])
 def test_zero_error_produces_zero_update(tiny_network, tiny_batch, mode):
-    """If target == baseline_pred, nothing should change."""
+    """Verify zero output error produces no activation or weight updates.
+
+    Args:
+        tiny_network (Network): Fresh network fixture.
+        tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
+        mode (str): Controller mode under test.
+
+    Returns:
+        None.
+    """
     x, _ = tiny_batch
     controller = ControlMechanism(mode=mode, lr_c=0.1, max_steps=60)
     plasticity = Plasticity(lr_w=0.5)
@@ -44,29 +54,28 @@ def test_zero_error_produces_zero_update(tiny_network, tiny_batch, mode):
         label="a_controlled vs a_baseline at zero error",
     )
 
-def test_learning_rule(): 
+
+def test_learning_rule():
+    """Validate the local plasticity learning-rule matrix update numerically.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+    """
     plasticity = Plasticity(lr_w=0.5)
 
     # dim is [batch_size, num_neurons]
-    a_pre = torch.tensor(
-                        [[1.0, 2.0], 
-                        [3.0, 4.0]])
-    a_baseline = torch.tensor(
-                        [[0.0, 1.0],
-                        [2.0, 0.0]])
-    a_controlled = torch.tensor(
-                        [[1.0, 0.0],
-                        [0.0, 1.0]])
+    a_pre = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    a_baseline = torch.tensor([[0.0, 1.0], [2.0, 0.0]])
+    a_controlled = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
 
     # delta_W = torch.matmul(errors.T, a_pre)
-    expected_delta_W = torch.tensor(
-                        [[-5.0, -6.0],
-                        [2.0, 2.0]])
-    
+    expected_delta_W = torch.tensor([[-5.0, -6.0], [2.0, 2.0]])
+
     # divide by batch size to get average update
     expected_delta_W = expected_delta_W / a_pre.size(0)
 
     computed_delta_W, _ = plasticity.learning_rule(a_pre, a_baseline, a_controlled)
     assert torch.allclose(computed_delta_W, expected_delta_W)
-
-
