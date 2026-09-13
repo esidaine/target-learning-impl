@@ -75,9 +75,6 @@ $$\Delta W_i = \frac{\eta_w}{B} \sum_{b=1}^{B} \left(a_{i,b}^{\mathrm{ctrl}} - a
 ├── xor_proof_of_mechanism.py       # XOR mechanism diagnostics and seed plots
 ├── pytests/                        # Unit and integration tests
 ├── requirements.txt                # Python dependencies
-├── pyproject.toml                  # Package metadata and tooling config
-├── data/                           # Local dataset cache (MNIST)
-├── evaluation_results/             # Generated benchmark outputs
 └── README.md                       # Project overview and usage notes
 ```
 
