@@ -1,10 +1,10 @@
 """Run matched MNIST evaluations and plot additive/multiplicative results.
 
 Example:
-    python src/evaluation.py --epochs 10 --seeds 7 17 27 37 47
+    python mnist_evaluation.py --epochs 10 --seeds 7 17 27 37 47
 
 The evaluation keeps the test split out of training and writes one JSON file,
-one CSV file, and two PNG plots to ``evaluation_results``.
+one CSV file, and several PNG plots into the configured output directory.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
@@ -35,7 +35,9 @@ from utils.config import ExperimentConfig, PIDControlParams, PIDPlasticityParams
 from utils.utils import set_all_seeds
 
 
-def evaluate_test_set(network: Network, loader: torch.utils.data.DataLoader) -> dict[str, float]:
+def evaluate_test_set(
+    network: Network, loader: torch.utils.data.DataLoader
+) -> dict[str, float]:
     """Return held-out MSE and classification accuracy for one model."""
     network.eval()
     total_squared_error = 0.0
@@ -44,9 +46,10 @@ def evaluate_test_set(network: Network, loader: torch.utils.data.DataLoader) -> 
     with torch.no_grad():
         for inputs, targets in loader:
             predictions = network(inputs, control_signals=None, save_baseline=False)
-            total_squared_error += torch.nn.functional.mse_loss(
-                predictions, targets, reduction="sum"
-            ).item()
+            batch_mse = torch.nn.functional.mse_loss(
+                predictions, targets, reduction="mean"
+            )
+            total_squared_error += batch_mse.item() * targets.size(0)
             correct += (predictions.argmax(dim=1) == targets.argmax(dim=1)).sum().item()
             total += targets.size(0)
     return {
@@ -112,23 +115,38 @@ def run_experiment(
             if not metrics.improved:
                 control_failures += 1
             control_improvement += metrics.improvement
-            control_magnitude += sum(c.abs().mean().item() for c in controls) / len(controls)
+            control_magnitude += sum(c.abs().mean().item() for c in controls) / len(
+                controls
+            )
             output_mse_before_control += metrics.initial_loss
             output_mse_after_control += metrics.final_loss
-            for layer_index, (pop, control) in enumerate(zip(network.populations, controls)):
+            for layer_index, (pop, control) in enumerate(
+                zip(network.populations, controls)
+            ):
                 baseline = pop.a_baseline
                 controlled = pop.a_controlled
                 target_activation = pop.target_activation
                 layer_control_magnitude[layer_index] += control.abs().mean().item()
-                if baseline is not None and controlled is not None and target_activation is not None:
-                    baseline_error = torch.nn.functional.mse_loss(baseline, target_activation)
-                    controlled_error = torch.nn.functional.mse_loss(controlled, target_activation)
+                if (
+                    baseline is not None
+                    and controlled is not None
+                    and target_activation is not None
+                ):
+                    baseline_error = torch.nn.functional.mse_loss(
+                        baseline, target_activation
+                    )
+                    controlled_error = torch.nn.functional.mse_loss(
+                        controlled, target_activation
+                    )
                     layer_control_improvement[layer_index] += (
                         baseline_error.item() - controlled_error.item()
                     )
                 if pop.z is not None:
-                    layer_inactive_fraction[layer_index] += (pop.z <= 0).float().mean().item()
+                    layer_inactive_fraction[layer_index] += (
+                        (pop.z <= 0).float().mean().item()
+                    )
             plasticity.update_weights(network=network, sensory_inputs=inputs)
+            network.refresh_feedback_weights()
 
             baseline = network.populations[-1].a_baseline
             batch_loss = torch.nn.functional.mse_loss(baseline, targets)
@@ -139,7 +157,9 @@ def run_experiment(
         weight_norm = max(
             pop.W.weight.detach().norm().item() for pop in network.populations
         )
-        finite = finite and all(torch.isfinite(torch.tensor(value)) for value in test_metrics.values())
+        finite = finite and all(
+            torch.isfinite(torch.tensor(value)) for value in test_metrics.values()
+        )
         history.append(
             {
                 "epoch": epoch + 1,
@@ -148,8 +168,10 @@ def run_experiment(
                 "test_accuracy": test_metrics["test_accuracy"],
                 "control_magnitude": control_magnitude / len(train_loader),
                 "control_improvement": control_improvement / len(train_loader),
-                "output_mse_before_control": output_mse_before_control / len(train_loader),
-                "output_mse_after_control": output_mse_after_control / len(train_loader),
+                "output_mse_before_control": output_mse_before_control
+                / len(train_loader),
+                "output_mse_after_control": output_mse_after_control
+                / len(train_loader),
                 "control_failures": control_failures,
                 "control_failure_rate": control_failures / len(train_loader),
                 "max_weight_norm": weight_norm,
@@ -185,9 +207,13 @@ def run_experiment(
 def save_results(results: list[dict[str, Any]], output_dir: Path) -> None:
     """Write results and plots for later comparison."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "mnist_results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+    (output_dir / "mnist_results.json").write_text(
+        json.dumps(results, indent=2), encoding="utf-8"
+    )
 
-    with (output_dir / "mnist_epoch_metrics.csv").open("w", newline="", encoding="utf-8") as file:
+    with (output_dir / "mnist_epoch_metrics.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as file:
         rows = [
             {"effect": run["effect"], "seed": run["seed"], **epoch}
             for run in results
@@ -207,13 +233,18 @@ def plot_learning_curves(results: list[dict[str, Any]], path: Path) -> None:
     """Plot mean +/- one standard deviation over seeds."""
     effects = sorted({run["effect"] for run in results})
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
-    metrics = [("test_accuracy", "Test accuracy", "Accuracy"), ("test_mse", "Test MSE", "MSE"),
-               ("train_mse", "Train MSE", "MSE"), ("control_failure_rate", "Control failure rate", "Rate")]
+    metrics = [
+        ("test_accuracy", "Test accuracy", "Accuracy"),
+        ("test_mse", "Test MSE", "MSE"),
+        ("train_mse", "Train MSE", "MSE"),
+        ("control_failure_rate", "Control failure rate", "Rate"),
+    ]
     for axis, (key, title, ylabel) in zip(axes.flat, metrics):
         for effect in effects:
             curves = [
                 [epoch[key] for epoch in run["history"]]
-                for run in results if run["effect"] == effect
+                for run in results
+                if run["effect"] == effect
             ]
             values = torch.tensor(curves, dtype=torch.float64)
             epochs = range(1, values.shape[1] + 1)
@@ -237,11 +268,29 @@ def plot_final_accuracy(results: list[dict[str, Any]], path: Path) -> None:
     fig, axis = plt.subplots(figsize=(8, 5), constrained_layout=True)
     positions = torch.arange(len(effects), dtype=torch.float64).numpy()
     for index, effect in enumerate(effects):
-        values = [run["history"][-1]["test_accuracy"] for run in results if run["effect"] == effect]
-        x = positions[index] + (torch.arange(len(values), dtype=torch.float64).numpy() - (len(values) - 1) / 2) * 0.04
+        values = [
+            run["history"][-1]["test_accuracy"]
+            for run in results
+            if run["effect"] == effect
+        ]
+        x = (
+            positions[index]
+            + (
+                torch.arange(len(values), dtype=torch.float64).numpy()
+                - (len(values) - 1) / 2
+            )
+            * 0.04
+        )
         axis.scatter(x, values, alpha=0.8, label=f"{effect} seeds")
-        axis.errorbar(index, sum(values) / len(values), yerr=torch.tensor(values).std(unbiased=False).item(),
-                      fmt="_", color="black", capsize=5, linewidth=2)
+        axis.errorbar(
+            index,
+            sum(values) / len(values),
+            yerr=torch.tensor(values).std(unbiased=False).item(),
+            fmt="_",
+            color="black",
+            capsize=5,
+            linewidth=2,
+        )
     axis.set_xticks(positions, effects)
     axis.set_ylim(0, 1)
     axis.set_ylabel("Final test accuracy")
@@ -255,9 +304,24 @@ def plot_diagnostics(results: list[dict[str, Any]], output_dir: Path) -> None:
     """Plot weight growth and controller behavior over training."""
     effects = sorted({run["effect"] for run in results})
     metrics = [
-        ("max_weight_norm", "Maximum forward-weight norm", "Norm", "mnist_max_weight_norm.png"),
-        ("control_magnitude", "Mean control magnitude", "Magnitude", "mnist_control_magnitude.png"),
-        ("control_failure_rate", "Control failure rate", "Failure rate", "mnist_control_failure_rate.png"),
+        (
+            "max_weight_norm",
+            "Maximum forward-weight norm",
+            "Norm",
+            "mnist_max_weight_norm.png",
+        ),
+        (
+            "control_magnitude",
+            "Mean control magnitude",
+            "Magnitude",
+            "mnist_control_magnitude.png",
+        ),
+        (
+            "control_failure_rate",
+            "Control failure rate",
+            "Failure rate",
+            "mnist_control_failure_rate.png",
+        ),
     ]
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 4.8), constrained_layout=True)
@@ -265,7 +329,8 @@ def plot_diagnostics(results: list[dict[str, Any]], output_dir: Path) -> None:
         for effect in effects:
             curves = [
                 [epoch[key] for epoch in run["history"]]
-                for run in results if run["effect"] == effect
+                for run in results
+                if run["effect"] == effect
             ]
             values = torch.tensor(curves, dtype=torch.float64)
             epochs = range(1, values.shape[1] + 1)
@@ -278,11 +343,14 @@ def plot_diagnostics(results: list[dict[str, Any]], output_dir: Path) -> None:
         axis.set_ylabel(ylabel)
         axis.grid(alpha=0.25)
         axis.legend()
-        fig_single, axis_single = plt.subplots(figsize=(6, 4.5), constrained_layout=True)
+        fig_single, axis_single = plt.subplots(
+            figsize=(6, 4.5), constrained_layout=True
+        )
         for effect in effects:
             curves = [
                 [epoch[key] for epoch in run["history"]]
-                for run in results if run["effect"] == effect
+                for run in results
+                if run["effect"] == effect
             ]
             values = torch.tensor(curves, dtype=torch.float64)
             epochs = range(1, values.shape[1] + 1)
@@ -312,14 +380,20 @@ def plot_layer_diagnostics(results: list[dict[str, Any]], path: Path) -> None:
         ("layer_weight_norms", "Weight norm", "Norm", False),
         ("layer_control_magnitudes", "Control magnitude", "Magnitude", False),
         ("layer_inactive_fractions", "Inactive ReLU fraction", "Fraction", True),
-        ("layer_control_improvements", "Local control improvement", "Improvement", False),
+        (
+            "layer_control_improvements",
+            "Local control improvement",
+            "Improvement",
+            False,
+        ),
     ]
     for axis, (key, title, ylabel, percent) in zip(axes.flat, metrics):
         for effect in effects:
             for layer_index in range(layer_count):
                 curves = [
                     [epoch[key][layer_index] for epoch in run["history"]]
-                    for run in results if run["effect"] == effect
+                    for run in results
+                    if run["effect"] == effect
                 ]
                 values = torch.tensor(curves, dtype=torch.float64)
                 epochs = range(1, values.shape[1] + 1)
@@ -340,8 +414,12 @@ def plot_layer_diagnostics(results: list[dict[str, Any]], path: Path) -> None:
         after = []
         for run in results:
             if run["effect"] == effect:
-                before.append([epoch["output_mse_before_control"] for epoch in run["history"]])
-                after.append([epoch["output_mse_after_control"] for epoch in run["history"]])
+                before.append(
+                    [epoch["output_mse_before_control"] for epoch in run["history"]]
+                )
+                after.append(
+                    [epoch["output_mse_after_control"] for epoch in run["history"]]
+                )
         before_values = torch.tensor(before, dtype=torch.float64).mean(dim=0).numpy()
         after_values = torch.tensor(after, dtype=torch.float64).mean(dim=0).numpy()
         epochs = range(1, len(before_values) + 1)
@@ -358,16 +436,30 @@ def plot_layer_diagnostics(results: list[dict[str, Any]], path: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """parse_args.
+
+    Args:
+
+    Returns:
+        argparse.Namespace:
+    """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--seeds", type=int, nargs="+", default=[7, 17, 27, 37, 47])
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--seeds", type=int, nargs="+", default=[7, 42])
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--data-root", type=Path, default=ROOT / "data")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "evaluation_results")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "mnist_evaluation")
     return parser.parse_args()
 
 
 def main() -> None:
+    """main.
+
+    Args:
+
+    Returns:
+        None:
+    """
     args = parse_args()
     results = [
         run_experiment(effect, seed, args.epochs, args.batch_size, args.data_root)
