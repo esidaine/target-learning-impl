@@ -53,7 +53,7 @@ class ControlErrorIntegrator:
     """
 
     def __init__(self, dt=0.1, tau=1.0, alpha=0.1, k_p=0.05):
-        """Initialize the PID-like control-error integrator.
+        """Initialize the PI-like control-error integrator.
 
         Args:
             dt (float): Time-step size used in the update rule.

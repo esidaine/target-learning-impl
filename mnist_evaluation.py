@@ -31,7 +31,7 @@ from core.controllers import ControlMechanism
 from core.plasticity import Plasticity
 from data.mnist.dataset import get_dataloader
 from models.network import Network
-from utils.config import ExperimentConfig, PIDControlParams, PIDPlasticityParams
+from utils.config import ExperimentConfig, PIControlParams, PIPlasticityParams
 from utils.utils import set_all_seeds
 
 
@@ -87,12 +87,12 @@ def run_experiment(
     """
     config = ExperimentConfig(
         task="mnist",
-        mode="pid",
+        mode="PI",
         dendritic_effect=effect,
         seed=seed,
         epochs=epochs,
-        controller=PIDControlParams(),
-        plasticity=PIDPlasticityParams(),
+        controller=PIControlParams(),
+        plasticity=PIPlasticityParams(),
     )
     set_all_seeds(seed)
     network = Network(pop_sizes=config.pop_sizes, dendritic_effect=effect)
@@ -504,11 +504,13 @@ def parse_args() -> argparse.Namespace:
         argparse.Namespace: Parsed evaluation and output configuration.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=55)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42])
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--data-root", type=Path, default=ROOT / "data")
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "mnist_evaluation")
+    parser.add_argument(
+        "--output-dir", type=Path, default=ROOT / "50_epochs_mnist_evaluation"
+    )
     return parser.parse_args()
 
 

@@ -35,7 +35,7 @@ from core.controllers import ControlMechanism
 from core.plasticity import Plasticity
 from data.xor.dataset import get_dataloader
 from models.network import Network
-from utils.config import PIDControlParams, PIDPlasticityParams
+from utils.config import PIControlParams, PIPlasticityParams
 from utils.utils import set_all_seeds
 
 CONDITIONS = ("full_method", "no_control", "controller_only")
@@ -121,9 +121,9 @@ def train_condition(
     set_all_seeds(seed)
     network = make_network(hidden_width)
     controller = ControlMechanism(
-        mode="pid",
+        mode="pi",
         feedback_mode="dfc",
-        **vars(PIDControlParams(max_steps=100)),
+        **vars(PIControlParams(max_steps=100)),
     )
     plasticity = Plasticity(lr_w=0.05)
     inputs, targets = xor_batch()

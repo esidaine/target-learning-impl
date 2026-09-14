@@ -213,7 +213,15 @@ def test_invalid_mode_raises(tiny_network, tiny_batch):
         controller.optimize_control_signal(x, y, tiny_network)
 
 
-@pytest.mark.parametrize("mode", ["backprop", "pid"])
+def test_uppercase_mode_names_are_accepted(tiny_network, tiny_batch):
+    """Accept uppercase mode names consistently with the public API."""
+    x, y = tiny_batch
+    controller = ControlMechanism(mode="PI", max_steps=2)
+    c_star, _ = controller.optimize_control_signal(x, y, tiny_network)
+    assert len(c_star) == len(tiny_network.populations)
+
+
+@pytest.mark.parametrize("mode", ["backprop", "pi"])
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_weights_stay_unchanged(tiny_network, tiny_batch, mode, dendritic_effect):
     """Ensure control optimization does not directly mutate forward weights.
@@ -243,7 +251,7 @@ def test_weights_stay_unchanged(tiny_network, tiny_batch, mode, dendritic_effect
         ), f"[{mode}] Layer {i} weights changed during control optimization."
 
 
-@pytest.mark.parametrize("mode", ["backprop", "pid"])
+@pytest.mark.parametrize("mode", ["backprop", "pi"])
 def test_initialized_controls_shape_and_magnitude(tiny_network, tiny_batch, mode):
     """Check that optimized controls preserve expected per-layer shapes.
 
@@ -264,7 +272,7 @@ def test_initialized_controls_shape_and_magnitude(tiny_network, tiny_batch, mode
         assert actual.shape == exp.shape
 
 
-@pytest.mark.parametrize("mode", ["backprop", "pid"])
+@pytest.mark.parametrize("mode", ["backprop", "pi"])
 def test_controls_have_false_required_grad(tiny_network, tiny_batch, mode):
     """Verify returned control signals are detached from autograd.
 
@@ -283,7 +291,7 @@ def test_controls_have_false_required_grad(tiny_network, tiny_batch, mode):
         assert not c.requires_grad, "Control signals should not require gradients."
 
 
-@pytest.mark.parametrize("mode", ["backprop", "pid"])
+@pytest.mark.parametrize("mode", ["backprop", "pi"])
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
 def test_early_exit_at_convergence(
     tiny_network, tiny_batch, mode, dendritic_effect, huge_tolerance=1000
@@ -312,7 +320,7 @@ def test_early_exit_at_convergence(
 
     c_star, _ = controller.optimize_control_signal(x, y, tiny_network)
 
-    # 1. No PID step actually executed → returned controls are still zeros.
+    # 1. No PI step actually executed → returned controls are still zeros.
     for i, c in enumerate(c_star):
         assert torch.allclose(c, torch.zeros_like(c)), (
             f"Layer {i}: expected zero c_star after early exit, "
@@ -341,10 +349,10 @@ def test_early_exit_at_convergence(
     [
         # Backprop uses true gradients → expect aggressive convergence.
         ("backprop", 100, 0.02),
-        # PID uses DFC-style random feedback → slower; expect modest but real progress.
-        ("pid", 500, 0.005),
+        # PI uses DFC-style random feedback → slower; expect modest but real progress.
+        ("pi", 500, 0.005),
     ],
-    ids=["backprop", "pid"],
+    ids=["backprop", "pi"],
 )
 def test_convergence_reduces_loss(
     tiny_network,
@@ -364,7 +372,7 @@ def test_convergence_reduces_loss(
         tiny_network (Network): The small network fixture used to evaluate control.
         tiny_batch (tuple[torch.Tensor, torch.Tensor]): Input batch and target output.
         dendritic_effect (str): Dendritic modulation rule being exercised.
-        mode (str): Controller mode under test, either "backprop" or "pid".
+        mode (str): Controller mode under test, either "backprop" or "PI".
         max_steps (int): Maximum number of optimization steps allowed in the run.
         min_relative_improvement (float): Minimum relative loss reduction required.
 
@@ -437,8 +445,8 @@ def _failure_report(mode: str, metrics, reason: str) -> str:
 
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
-    """Check that PID control does not diverge across multiple random seeds.
+def test_PI_does_not_diverge(tiny_batch, dendritic_effect):
+    """Check that PI control does not diverge across multiple random seeds.
 
     Args:
         tiny_batch (tuple[torch.Tensor, torch.Tensor]): XOR input and target tensors.
@@ -456,7 +464,7 @@ def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
         for pop in net.populations:
             pop.dendritic_effect = dendritic_effect
 
-        controller = ControlMechanism(mode="pid", max_steps=100)
+        controller = ControlMechanism(mode="pi", max_steps=100)
         _, metrics = controller.optimize_control_signal(x, y, net)
 
         history = metrics.loss_history
@@ -467,4 +475,4 @@ def test_pid_does_not_diverge(tiny_batch, dendritic_effect):
 
     assert (
         not diverged_seeds
-    ), f"[{dendritic_effect}] PID diverged on seeds: {diverged_seeds}"
+    ), f"[{dendritic_effect}] PI diverged on seeds: {diverged_seeds}"

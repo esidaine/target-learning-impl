@@ -3,8 +3,8 @@ from typing import List, Literal, Union, Optional
 
 
 @dataclass
-class PIDControlParams:
-    """PIDControlParams."""
+class PIControlParams:
+    """PIControlParams."""
 
     k_p: float = 0.8
     dt: float = 0.1
@@ -24,8 +24,8 @@ class BackpropControlParams:
 
 
 @dataclass
-class PIDPlasticityParams:
-    """PIDPlasticityParams."""
+class PIPlasticityParams:
+    """PIPlasticityParams."""
 
     lr_w: float = 0.0001  # CHANGE TO 0.0001 for mnist, 0.05 for xor
 
@@ -43,7 +43,7 @@ class ExperimentConfig:
 
     # 1. High-Level Meta
     task: Literal["xor", "mnist"] = "xor"
-    mode: Literal["backprop", "pid"] = "pid"
+    mode: Literal["backprop", "pi"] = "pi"
     seed: int = 7
     epochs: int = 3  # CHANGE for real training to 800
 
@@ -53,11 +53,11 @@ class ExperimentConfig:
     leaky_slope: float = 0.01
 
     # 3. Mode-Dependent Parameters (Polymorphic)
-    controller: Union[PIDControlParams, BackpropControlParams] = field(
-        default_factory=PIDControlParams
+    controller: Union[PIControlParams, BackpropControlParams] = field(
+        default_factory=PIControlParams
     )
-    plasticity: Union[PIDPlasticityParams, BackpropPlasticityParams] = field(
-        default_factory=PIDPlasticityParams
+    plasticity: Union[PIPlasticityParams, BackpropPlasticityParams] = field(
+        default_factory=PIPlasticityParams
     )
 
     def __post_init__(self):
@@ -77,14 +77,14 @@ class ExperimentConfig:
                 [2, 8, 1] if self.task == "xor" else [784, 256, 128, 64, 10]
             )
 
-        if self.mode == "pid":
-            if not isinstance(self.controller, PIDControlParams):
+        if self.mode == "pi":
+            if not isinstance(self.controller, PIControlParams):
                 raise ValueError(
-                    f"Mismatch: mode is 'pid', but controller is {type(self.controller).__name__}"
+                    f"Mismatch: mode is 'pi', but controller is {type(self.controller).__name__}"
                 )
-            if not isinstance(self.plasticity, PIDPlasticityParams):
+            if not isinstance(self.plasticity, PIPlasticityParams):
                 raise ValueError(
-                    f"Mismatch: mode is 'pid', but plasticity is {type(self.plasticity).__name__}"
+                    f"Mismatch: mode is 'pi', but plasticity is {type(self.plasticity).__name__}"
                 )
 
         elif self.mode == "backprop":

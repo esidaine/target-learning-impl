@@ -19,7 +19,7 @@ class OptimizationMetrics:
     steps_taken: int = 0
     converged: bool = False
     loss_history: list[float] = field(default_factory=list)
-    final_control: Optional[torch.Tensor] = None  # last global u, PID only
+    final_control: Optional[torch.Tensor] = None  # last global u, PI only
 
     # Stores a list of time steps. Each time step contains a list of layer activations.
     state_history: list[list[np.ndarray]] = field(default_factory=list)
@@ -93,7 +93,7 @@ class OptimizationMetrics:
 class ControlMechanism:
     """
     Generates the control signal (c_n) (per neuron) and finds the optimal control signal (c_n*) that allows the neuron to converge to the target firing rate (a_target).
-    Has two implementations: with backpropagation and with PID control
+    Has two implementations: with backpropagation and with PI control
     """
 
     def __init__(
@@ -109,15 +109,15 @@ class ControlMechanism:
         use_derivative=True,
         feedback_mode="dfc",
     ):
-        """Initialize the controller configuration for either backprop or PID optimization.
+        """Initialize the controller configuration for either backprop or PI optimization.
 
         Args:
             mode (str): Optimization mode to use. Supported values are "backprop" and
-                "pid".
+                "pi".
             lr_c (float): Learning rate for the control signal in backprop mode.
             momentum (float): Momentum coefficient used by the control optimizer.
             max_steps (int): Maximum number of optimization iterations allowed.
-            dt (float): Time-step size for the PID integrator.
+            dt (float): Time-step size for the PI integrator.
             tau (float): Time constant controlling the settling dynamics.
             alpha (float): Leak coefficient used by the control integrator.
             k_p (float): Proportional gain applied to the control error.
@@ -128,7 +128,7 @@ class ControlMechanism:
         Returns:
             None.
         """
-        self.mode = mode
+        self.mode = str(mode).lower()
         self.lr_c = lr_c
         self.momentum = momentum
         self.max_steps = max_steps
@@ -224,8 +224,8 @@ class ControlMechanism:
             optimized_controls = self._optimize_via_backprop(
                 initial_controls, sensory_inputs, target_y, network, metrics
             )
-        elif self.mode == "pid":
-            optimized_controls = self._optimize_via_pid(
+        elif self.mode == "pi":
+            optimized_controls = self._optimize_via_pi(
                 initial_controls,
                 sensory_inputs,
                 target_y,
@@ -235,7 +235,7 @@ class ControlMechanism:
                 self.use_derivative,
             )
         else:
-            raise ValueError("Mode must be 'backprop' or 'pid'")
+            raise ValueError("Mode must be 'backprop' or 'pi'")
 
         if not metrics.improved:
             logger.warning(
@@ -312,8 +312,8 @@ class ControlMechanism:
         # We detach them because we are done optimizing them and don't want to carry the computational graph forward.
         return [c_n.detach() for c_n in control_signals]
 
-    @torch.no_grad()  # Turn off PyTorch autograd for PID. That means we won't use W.T for the feedback
-    def _optimize_via_pid(
+    @torch.no_grad()  # Turn off PyTorch autograd for PI. That means we won't use W.T for the feedback
+    def _optimize_via_pi(
         self,
         control_signals,
         sensory_inputs,
@@ -338,7 +338,7 @@ class ControlMechanism:
             list[torch.Tensor]: Detached local controls after settling.
         """
         manim_snapshot = (
-            False  # Set to True to enable Manim snapshots during PID optimization
+            False  # Set to True to enable Manim snapshots during PI optimization
         )
 
         control_stepper = ControlErrorIntegrator(

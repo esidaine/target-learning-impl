@@ -31,9 +31,9 @@ from utils.utils import set_all_seeds, save_experiment, get_weight_metrics, get_
 from utils.config import (
     ExperimentConfig,
     BackpropControlParams,
-    PIDControlParams,
+    PIControlParams,
     BackpropPlasticityParams,
-    PIDPlasticityParams,
+    PIPlasticityParams,
 )
 from IPython.display import clear_output
 from tqdm import tqdm
@@ -145,11 +145,11 @@ def main():
     """
     config = ExperimentConfig(
         task="mnist",  # Choose 'mnist' or 'xor'
-        mode="pid",  # Choose 'backprop' or 'pid'
+        mode="pi",  # Choose 'backprop' or 'pi'
         dendritic_effect="additive",  # Choose 'additive' or 'multiplicative'
         seed=42,
-        controller=PIDControlParams(),
-        plasticity=PIDPlasticityParams(),
+        controller=PIControlParams(),
+        plasticity=PIPlasticityParams(),
     )
 
     set_all_seeds(config.seed)
@@ -264,7 +264,7 @@ def main():
     if wandb.run is not None:
         wandb.finish()
 
-    if config.mode == "pid" and manim:
+    if config.mode == "pi" and manim:
         # Grab ONE sample batch from your dataset
         test_inputs, test_targets = next(iter(dataloader))
 

@@ -9,13 +9,13 @@ from core.plasticity import Plasticity
 from core.trainer import Trainer
 from data.xor.dataset import get_dataloader
 from utils.utils import set_all_seeds
-from utils.config import PIDControlParams, PIDPlasticityParams
+from utils.config import PIControlParams, PIPlasticityParams
 from dataclasses import asdict
 from models.network import NeuralPopulation
 import torch.nn as nn
 
 
-@pytest.mark.parametrize("mode", ["backprop", "pid"])
+@pytest.mark.parametrize("mode", ["backprop", "pi"])
 def test_zero_error_produces_zero_update(tiny_network, tiny_batch, mode):
     """Verify zero output error produces no activation or weight updates.
 

@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.mark.parametrize("dendritic_effect", ["additive", "multiplicative"])
-@pytest.mark.parametrize("mode", ["backprop", "pid"])
+@pytest.mark.parametrize("mode", ["backprop", "pi"])
 def test_single_step_loss_decreases(tiny_network, tiny_batch, mode, dendritic_effect):
     """Verify one control-plasticity update reduces baseline loss.
 

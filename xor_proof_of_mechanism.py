@@ -26,8 +26,8 @@ from utils.config import (
     BackpropControlParams,
     BackpropPlasticityParams,
     ExperimentConfig,
-    PIDControlParams,
-    PIDPlasticityParams,
+    PIControlParams,
+    PIPlasticityParams,
 )
 from utils.utils import set_all_seeds
 
@@ -49,10 +49,10 @@ def train_one_seed(
     Args:
         seed (int): Random seed for initialization and data order.
         epochs (int): Number of training epochs.
-        mode (str): Controller mode, typically ``"pid"`` or ``"backprop"``.
+        mode (str): Controller mode, typically ``"pi"`` or ``"backprop"``.
         dendritic_effect (str): Dendritic interaction mode used by the network.
         lr_w (float | None): Optional override for the plasticity learning rate.
-        k_p (float | None): Optional override for the PID proportional gain.
+        k_p (float | None): Optional override for the PI proportional gain.
         bias_mode (str): Bias initialization strategy.
         refresh_feedback (bool): Whether to refresh feedback weights after updates.
         hidden_width (int): Width of the hidden layer.
@@ -63,16 +63,16 @@ def train_one_seed(
     """
     set_all_seeds(seed)
 
-    if mode == "pid":
-        controller_config = PIDControlParams()
-        plasticity_config = PIDPlasticityParams()
+    if mode == "pi":
+        controller_config = PIControlParams()
+        plasticity_config = PIPlasticityParams()
     else:
         controller_config = BackpropControlParams()
         plasticity_config = BackpropPlasticityParams()
 
     if lr_w is not None:
         plasticity_config.lr_w = lr_w
-    if k_p is not None and mode == "pid":
+    if k_p is not None and mode == "pi":
         controller_config.k_p = k_p
 
     config = ExperimentConfig(
@@ -361,7 +361,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[7, 42, 27, 37, 47, 17, 23, 31, 53, 71],
     )
-    parser.add_argument("--mode", choices=["pid", "backprop"], default="pid")
+    parser.add_argument("--mode", choices=["pi", "backprop"], default="pi")
     parser.add_argument("--lr-w", type=float, default=None)
     parser.add_argument("--k-p", type=float, default=None)
     parser.add_argument("--hidden-width", type=int, default=8)

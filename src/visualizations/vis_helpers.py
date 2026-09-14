@@ -8,7 +8,7 @@ import numpy as np
 def make_manim_snapshot(network: Any, local_controls: list[Any], metrics: Any) -> None:
     """Record the current activation state for a later Manim animation.
 
-    The controller calls this once per PID step. Keeping snapshots as NumPy
+    The controller calls this once per PI step. Keeping snapshots as NumPy
     arrays makes them independent of autograd and safe to serialize with
     ``pickle`` after training.
 
